@@ -1,12 +1,15 @@
 import subprocess
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from orchestrator.app.agent_runner import AgentExecutionResult
 from orchestrator.app.config import get_settings
 from orchestrator.app.database import Base, get_db
+from orchestrator.app.exceptions import AgentExecutionError
 from orchestrator.app.main import app
 from orchestrator.app.models import Milestone, Project, Task, TaskStatus
 
@@ -26,7 +29,14 @@ def api_environment(tmp_path):
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(repository), "config", "user.email", "test@example.com"],
+        [
+            "git",
+            "-C",
+            str(repository),
+            "config",
+            "user.email",
+            "test@example.com",
+        ],
         check=True,
     )
 
@@ -68,7 +78,7 @@ def api_environment(tmp_path):
     get_settings.cache_clear()
     app.dependency_overrides[get_db] = override_get_db
 
-    # Override settings for this test without modifying the real .env file.
+    import orchestrator.app.task_routes as task_routes
     from orchestrator.app.config import Settings
 
     test_settings = Settings(
@@ -80,10 +90,11 @@ def api_environment(tmp_path):
         repository_path=repository,
     )
 
-    import orchestrator.app.task_routes as task_routes
-
     original_route_settings = task_routes.get_settings
+    original_session_local = task_routes.SessionLocal
+
     task_routes.get_settings = lambda: test_settings
+    task_routes.SessionLocal = TestSession
 
     try:
         with TestClient(app) as client:
@@ -97,6 +108,7 @@ def api_environment(tmp_path):
     finally:
         app.dependency_overrides.clear()
         task_routes.get_settings = original_route_settings
+        task_routes.SessionLocal = original_session_local
         get_settings.cache_clear()
         engine.dispose()
 
@@ -155,7 +167,9 @@ def test_create_task_rejects_invalid_payload() -> None:
     assert response.status_code == 422
 
 
-def test_create_task_returns_bad_request_for_unknown_milestone(api_environment) -> None:
+def test_create_task_returns_bad_request_for_unknown_milestone(
+    api_environment,
+) -> None:
     client, _, _, _, _ = api_environment
 
     response = client.post(
@@ -184,3 +198,100 @@ def test_create_task_returns_service_unavailable_without_repository_setting(
 
     assert response.status_code == 503
     assert "repository_path" in response.json()["detail"]
+
+
+def test_run_task_endpoint_success(api_environment, monkeypatch) -> None:
+    from orchestrator.app import task_routes
+
+    client, test_session, milestone_id, _, _ = api_environment
+
+    create_response = client.post(
+        "/tasks",
+        json={
+            "milestone_id": milestone_id,
+            "title": "Test agent execution",
+            "description": "Run the agent through the API.",
+        },
+    )
+    assert create_response.status_code == 201
+
+    task_data = create_response.json()
+    fake_runner = MagicMock()
+    fake_runner.run.return_value = AgentExecutionResult(
+        return_code=0,
+        stdout="Task completed",
+        stderr="",
+        process_id=None,
+    )
+
+    from orchestrator.app.agent_service import AgentService
+
+    monkeypatch.setattr(
+        task_routes,
+        "AgentService",
+        lambda db: AgentService(db=db, runner=fake_runner),
+    )
+
+    response = client.post(f"/tasks/{task_data['id']}/run")
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["task_id"] == task_data["id"]
+    assert data["status"] == "QUEUED"
+    assert data["message"] == "Agent execution has been scheduled."
+
+    fake_runner.run.assert_called_once()
+
+    with test_session() as session:
+        saved_task = session.get(Task, task_data["id"])
+        assert saved_task is not None
+        assert saved_task.status == TaskStatus.COMPLETED
+
+
+def test_run_task_endpoint_returns_bad_request_for_unknown_task(
+    api_environment,
+) -> None:
+    client, _, _, _, _ = api_environment
+
+    response = client.post("/tasks/999999/run")
+
+    assert response.status_code == 400
+    assert "does not exist" in response.json()["detail"]
+
+
+def test_run_task_endpoint_returns_accepted_on_agent_execution_failure(
+    api_environment,
+    monkeypatch,
+) -> None:
+    from orchestrator.app import task_routes
+
+    client, _, milestone_id, _, _ = api_environment
+
+    create_response = client.post(
+        "/tasks",
+        json={
+            "milestone_id": milestone_id,
+            "title": "Test failed agent",
+            "description": "Simulate an agent execution error.",
+        },
+    )
+    assert create_response.status_code == 201
+    task_id = create_response.json()["id"]
+
+    fake_service = MagicMock()
+    fake_service.run_task.side_effect = AgentExecutionError("Simulated failure")
+
+    monkeypatch.setattr(
+        task_routes,
+        "AgentService",
+        lambda db: fake_service,
+    )
+
+    response = client.post(f"/tasks/{task_id}/run")
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["task_id"] == task_id
+    assert data["status"] == "QUEUED"
+
+    fake_service.run_task.assert_called_once_with(task_id)
