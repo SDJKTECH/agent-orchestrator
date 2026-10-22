@@ -237,3 +237,80 @@ def test_run_task_rejects_invalid_effort_before_execution(setup_agent_service):
 
     context.runner.run.assert_not_called()
     context.db.add.assert_not_called()
+
+
+def test_run_task_persists_usage_metrics(setup_agent_service):
+    context = setup_agent_service
+    context.runner.run.return_value = AgentExecutionResult(
+        return_code=0,
+        stdout=(
+            '{"session_id": "session-123", '
+            '"total_cost_usd": 0.0379284, '
+            '"usage": {'
+            '"input_tokens": 2, '
+            '"output_tokens": 4, '
+            '"cache_creation_input_tokens": 9117, '
+            '"cache_read_input_tokens": 14164'
+            "}, "
+            '"modelUsage": {'
+            '"claude-sonnet-5-5": {'
+            '"inputTokens": 2, '
+            '"outputTokens": 4, '
+            '"cacheReadInputTokens": 14164, '
+            '"cacheCreationInputTokens": 9117, '
+            '"costUSD": 0.0379284'
+            "}"
+            "}}"
+        ),
+        stderr="",
+        process_id=12345,
+    )
+
+    result = context.service.run_task(1)
+
+    assert result.input_tokens == 2
+    assert result.output_tokens == 4
+    assert result.cache_creation_input_tokens == 9117
+    assert result.cache_read_input_tokens == 14164
+    assert result.reported_cost_usd == pytest.approx(0.0379284)
+    assert result.session_id == "session-123"
+
+    # Preserve the configured model alias.
+    assert result.model == "sonnet"
+    assert result.status == "COMPLETED"
+
+
+def test_run_task_handles_missing_usage_metrics(setup_agent_service):
+    context = setup_agent_service
+
+    result = context.service.run_task(1)
+
+    assert result.input_tokens in (None, 0)
+    assert result.output_tokens in (None, 0)
+    assert result.cache_creation_input_tokens is None
+    assert result.cache_read_input_tokens is None
+    assert result.reported_cost_usd is None
+    assert result.session_id is None
+    assert result.status == "COMPLETED"
+
+
+def test_run_task_persists_usage_when_execution_fails(setup_agent_service):
+    context = setup_agent_service
+    context.runner.run.return_value = AgentExecutionResult(
+        return_code=1,
+        stdout=(
+            '{"session_id": "session-failed", '
+            '"total_cost_usd": 0.01, '
+            '"usage": {"input_tokens": 10, "output_tokens": 3}}'
+        ),
+        stderr="Task failed",
+        process_id=12345,
+    )
+
+    result = context.service.run_task(1)
+
+    assert result.status == "FAILED"
+    assert result.input_tokens == 10
+    assert result.output_tokens == 3
+    assert result.reported_cost_usd == pytest.approx(0.01)
+    assert result.session_id == "session-failed"

@@ -6,9 +6,12 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 
 from orchestrator.app.config import get_settings
+from orchestrator.app.database import create_tables, engine
 from orchestrator.app.execution_manager import ExecutionManager
 from orchestrator.app.logging_config import setup_logging
+from orchestrator.app.migrations import migrate_usage_columns
 from orchestrator.app.task_routes import router as task_router
+from orchestrator.app.usage_routes import router as usage_router
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -17,6 +20,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    create_tables()
+    migrate_usage_columns(engine)
     logger.info("Application startup")
 
     manager = ExecutionManager(max_workers=get_settings().max_concurrent_agents)
@@ -39,6 +44,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(task_router)
+app.include_router(usage_router)
 
 
 @app.middleware("http")

@@ -113,6 +113,11 @@ class AgentRun(Base):
     session_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_creation_input_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    cache_read_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reported_cost_usd: Mapped[float | None] = mapped_column(nullable=True)
     estimated_cost: Mapped[float | None] = mapped_column(nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

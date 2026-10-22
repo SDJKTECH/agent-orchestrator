@@ -12,6 +12,7 @@ from orchestrator.app.config import get_settings
 from orchestrator.app.exceptions import AgentExecutionError
 from orchestrator.app.model_router import ModelRouter
 from orchestrator.app.models import AgentRun, Task, TaskStatus
+from orchestrator.app.usage_tracker import parse_usage
 
 
 def _utc_now() -> datetime:
@@ -128,6 +129,28 @@ class AgentService:
                 cwd=worktree_path,
                 timeout_seconds=self.settings.agent_timeout_seconds,
             )
+
+            usage = parse_usage(result.stdout)
+
+            if usage.input_tokens is not None:
+                agent_run.input_tokens = usage.input_tokens
+
+            if usage.output_tokens is not None:
+                agent_run.output_tokens = usage.output_tokens
+
+            if usage.cache_creation_input_tokens is not None:
+                agent_run.cache_creation_input_tokens = (
+                    usage.cache_creation_input_tokens
+                )
+
+            if usage.cache_read_input_tokens is not None:
+                agent_run.cache_read_input_tokens = usage.cache_read_input_tokens
+
+            if usage.reported_cost_usd is not None:
+                agent_run.reported_cost_usd = usage.reported_cost_usd
+
+            if usage.session_id is not None:
+                agent_run.session_id = usage.session_id
 
             agent_run.process_id = result.process_id
             agent_run.finished_at = _utc_now()

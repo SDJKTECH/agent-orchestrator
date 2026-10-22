@@ -22,3 +22,36 @@ class TaskResponse(BaseModel):
     branch_name: str | None
     worktree_path: str | None
     created_at: datetime
+
+
+class AgentRunUsageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int
+    agent_role: str
+    model: str | None
+    effort: str | None
+    status: str
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int | None
+    cache_read_input_tokens: int | None
+    reported_cost_usd: float | None
+    estimated_cost: float | None
+    session_id: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class UsageSummaryResponse(BaseModel):
+    task_count: int
+    run_count: int
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
+    reported_cost_usd: float
+    estimated_cost: float
+    reported_cost_run_count: int
+    estimated_cost_run_count: int
