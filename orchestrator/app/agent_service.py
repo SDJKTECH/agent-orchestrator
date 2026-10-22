@@ -61,27 +61,29 @@ class AgentService:
             raise AgentExecutionError(
                 f"Task {task_id} worktree does not exist: {worktree_path}"
             )
-        agent_definition = worktree_path / ".claude" / "agents" / "builder.md"
+
+        if not agent_role.strip():
+            raise ValueError("Agent role cannot be empty.")
+
+        agent_definition = worktree_path / ".claude" / "agents" / f"{agent_role}.md"
 
         if not agent_definition.is_file():
+            role_label = agent_role.replace("_", " ").title()
             raise AgentExecutionError(
-                "Builder agent definition not found in task worktree: "
-                f"{agent_definition}. Commit .claude/agents/builder.md "
-                "to the base branch and recreate the worktree."
+                f"{role_label} agent definition not found: "
+                f"{agent_definition}. Commit the agent definition to the "
+                "base branch and recreate the worktree."
             )
 
-        selected_model = model
-        selected_effort = effort
         budget = max_budget_usd
-
         if budget is None:
             budget = self.settings.max_task_cost_usd
 
         command = build_claude_command(
             claude_command=self.settings.claude_command,
             prompt=self._build_prompt(task),
-            model=selected_model,
-            effort=selected_effort,
+            model=model,
+            effort=effort,
             max_budget_usd=budget,
             agent=agent_role,
         )
@@ -89,9 +91,9 @@ class AgentService:
         agent_run = AgentRun(
             task_id=task.id,
             agent_role=agent_role,
-            model=selected_model,
-            effort=selected_effort,
-            status="RUNNING",
+            model=model,
+            effort=effort,
+            status="STARTING",
             started_at=_utc_now(),
         )
 
@@ -101,12 +103,15 @@ class AgentService:
         try:
             self.db.commit()
             self.db.refresh(agent_run)
-        except Exception:
+        except Exception as exc:
             self.db.rollback()
-            raise
+            raise AgentExecutionError(
+                f"Could not persist the initial state for task {task_id}."
+            ) from exc
 
         try:
             task.status = TaskStatus.RUNNING
+            agent_run.status = "RUNNING"
             self.db.commit()
 
             result = self.runner.run(
@@ -115,6 +120,7 @@ class AgentService:
                 timeout_seconds=self.settings.agent_timeout_seconds,
             )
 
+            agent_run.process_id = result.process_id
             agent_run.finished_at = _utc_now()
 
             if result.return_code == 0:
@@ -142,18 +148,17 @@ class AgentService:
         title = task.title.strip()
         description = (task.description or "").strip()
 
-        prompt = (
-            f"Complete the following software development task.\n\n"
+        return (
+            "Complete the following software development task.\n\n"
             f"Task: {title}\n\n"
-            f"Description:\n{description or 'No additional description provided.'}\n\n"
+            "Description:\n"
+            f"{description or 'No additional description provided.'}\n\n"
             "Work only within the current repository/worktree. "
             "Inspect the existing code and tests before making changes. "
             "Implement the task, run relevant tests when feasible, and "
             "summarize the changes and test results. Do not commit or push "
             "changes unless explicitly instructed."
         )
-
-        return prompt
 
     def _mark_failed(self, task: Task, agent_run: AgentRun) -> None:
         """Persist failure state without masking the original exception."""

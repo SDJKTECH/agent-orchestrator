@@ -163,3 +163,35 @@ def test_run_task_rejects_missing_builder_definition(setup_agent_service):
         context.service.run_task(1)
 
     context.runner.run.assert_not_called()
+
+
+def test_run_task_persists_process_id(setup_agent_service):
+    context = setup_agent_service
+
+    context.runner.run.return_value = AgentExecutionResult(
+        return_code=0,
+        stdout='{"result": "Task completed"}',
+        stderr="",
+        process_id=12345,
+    )
+
+    result = context.service.run_task(1)
+
+    assert result.process_id == 12345
+    assert context.task.status == TaskStatus.COMPLETED
+
+
+def test_run_task_allows_missing_process_id(setup_agent_service):
+    context = setup_agent_service
+
+    context.runner.run.return_value = AgentExecutionResult(
+        return_code=0,
+        stdout='{"result": "Task completed"}',
+        stderr="",
+        process_id=None,
+    )
+
+    result = context.service.run_task(1)
+
+    assert result.process_id is None
+    assert context.task.status == TaskStatus.COMPLETED

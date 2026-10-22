@@ -44,30 +44,42 @@ class SubprocessRunner:
         if not cwd.is_dir():
             raise AgentExecutionError(f"Agent working directory does not exist: {cwd}")
 
+        process: subprocess.Popen[str] | None = None
+
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 cwd=cwd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=timeout_seconds,
-                check=False,
                 shell=False,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise AgentExecutionError(
-                f"Agent execution exceeded {timeout_seconds} seconds."
-            ) from exc
+
+            process_id = process.pid
+
+            try:
+                stdout, stderr = process.communicate(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                process.kill()
+                stdout, stderr = process.communicate()
+
+                raise AgentExecutionError(
+                    f"Agent execution exceeded {timeout_seconds} seconds."
+                ) from exc
+
+        except AgentExecutionError:
+            raise
         except OSError as exc:
             raise AgentExecutionError(f"Could not start agent process: {exc}") from exc
 
         result = AgentExecutionResult(
-            return_code=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            process_id=None,
+            return_code=process.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            process_id=process_id,
         )
 
         if result.return_code != 0:

@@ -1,6 +1,6 @@
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -72,19 +72,22 @@ def test_build_claude_command_rejects_invalid_budget() -> None:
 
 def test_subprocess_runner_returns_output(tmp_path: Path) -> None:
     runner = SubprocessRunner()
-    working_directory = tmp_path
 
-    with patch("orchestrator.app.agent_runner.subprocess.run") as mock_run:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["fake-command"],
-            returncode=0,
-            stdout="Agent completed",
-            stderr="",
-        )
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.returncode = 0
+    mock_process.communicate.return_value = (
+        "Agent completed",
+        "",
+    )
 
+    with patch(
+        "orchestrator.app.agent_runner.subprocess.Popen",
+        return_value=mock_process,
+    ) as mock_popen:
         result = runner.run(
             ["fake-command"],
-            cwd=working_directory,
+            cwd=tmp_path,
             timeout_seconds=30,
         )
 
@@ -92,10 +95,11 @@ def test_subprocess_runner_returns_output(tmp_path: Path) -> None:
     assert result.return_code == 0
     assert result.stdout == "Agent completed"
     assert result.stderr == ""
+    assert result.process_id == 12345
 
-    mock_run.assert_called_once()
-    assert mock_run.call_args.kwargs["shell"] is False
-    assert mock_run.call_args.kwargs["timeout"] == 30
+    mock_popen.assert_called_once()
+    assert mock_popen.call_args.kwargs["shell"] is False
+    mock_process.communicate.assert_called_once_with(timeout=30)
 
 
 def test_subprocess_runner_rejects_missing_directory(
@@ -115,12 +119,19 @@ def test_subprocess_runner_rejects_missing_directory(
 def test_subprocess_runner_handles_timeout(tmp_path: Path) -> None:
     runner = SubprocessRunner()
 
-    with patch(
-        "orchestrator.app.agent_runner.subprocess.run",
-        side_effect=subprocess.TimeoutExpired(
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.communicate.side_effect = [
+        subprocess.TimeoutExpired(
             cmd=["fake-command"],
             timeout=30,
         ),
+        ("", ""),
+    ]
+
+    with patch(
+        "orchestrator.app.agent_runner.subprocess.Popen",
+        return_value=mock_process,
     ):
         with pytest.raises(AgentExecutionError, match="exceeded"):
             runner.run(
@@ -128,6 +139,9 @@ def test_subprocess_runner_handles_timeout(tmp_path: Path) -> None:
                 cwd=tmp_path,
                 timeout_seconds=30,
             )
+
+    mock_process.kill.assert_called_once()
+    assert mock_process.communicate.call_count == 2
 
 
 def test_subprocess_runner_handles_startup_error(
