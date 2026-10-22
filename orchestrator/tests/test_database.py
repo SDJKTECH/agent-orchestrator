@@ -1,4 +1,3 @@
-
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -15,9 +14,7 @@ from orchestrator.app.models import (
 
 def test_create_project_task_and_agent_run(tmp_path) -> None:
     database_file = tmp_path / "test.db"
-    engine = create_engine(
-        f"sqlite:///{database_file.as_posix()}"
-    )
+    engine = create_engine(f"sqlite:///{database_file.as_posix()}")
 
     Base.metadata.create_all(bind=engine)
     TestSession = sessionmaker(
@@ -62,9 +59,7 @@ def test_create_project_task_and_agent_run(tmp_path) -> None:
         session.add(verification)
         session.commit()
 
-        saved_task = session.scalar(
-            select(Task).where(Task.id == task.id)
-        )
+        saved_task = session.scalar(select(Task).where(Task.id == task.id))
 
         assert saved_task is not None
         assert saved_task.status == TaskStatus.QUEUED

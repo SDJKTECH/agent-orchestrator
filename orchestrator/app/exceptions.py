@@ -1,4 +1,3 @@
-
 class OrchestratorError(Exception):
     """Base exception for expected orchestrator failures."""
 

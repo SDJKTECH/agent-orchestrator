@@ -1,4 +1,3 @@
-
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -51,8 +50,7 @@ async def log_requests(request: Request, call_next):
     duration_ms = (time.perf_counter() - start_time) * 1000
 
     logger.info(
-        "Request completed: request_id=%s method=%s path=%s "
-        "status=%s duration_ms=%.2f",
+        "Request completed: request_id=%s method=%s path=%s status=%s duration_ms=%.2f",
         request_id,
         request.method,
         request.url.path,

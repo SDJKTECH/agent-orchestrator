@@ -1,4 +1,3 @@
-
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -14,10 +13,7 @@ def setup_logging() -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
 
     formatter = logging.Formatter(
-        fmt=(
-            "%(asctime)s | %(levelname)s | "
-            "%(name)s | %(message)s"
-        ),
+        fmt=("%(asctime)s | %(levelname)s | %(name)s | %(message)s"),
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 

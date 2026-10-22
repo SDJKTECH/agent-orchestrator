@@ -1,4 +1,3 @@
-
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -16,14 +15,10 @@ class Settings(BaseSettings):
 
     app_name: str = "AI Coding Agent Orchestrator"
     app_version: str = "0.1.0"
-    environment: Literal[
-        "development", "test", "production"
-    ] = "development"
+    environment: Literal["development", "test", "production"] = "development"
 
     database_url: str = "sqlite:///./orchestrator.db"
-    log_level: Literal[
-        "DEBUG", "INFO", "WARNING", "ERROR"
-    ] = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # Repository and Claude Code execution settings
     repository_path: Path | None = None

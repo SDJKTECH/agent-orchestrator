@@ -1,4 +1,3 @@
-
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
@@ -8,11 +7,7 @@ from orchestrator.app.config import get_settings
 
 DATABASE_URL = get_settings().database_url
 
-connect_args = (
-    {"check_same_thread": False}
-    if DATABASE_URL.startswith("sqlite")
-    else {}
-)
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(
     DATABASE_URL,
