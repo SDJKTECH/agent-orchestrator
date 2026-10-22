@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 
 from orchestrator.app.config import get_settings
+from orchestrator.app.execution_manager import ExecutionManager
 from orchestrator.app.logging_config import setup_logging
 from orchestrator.app.task_routes import router as task_router
 
@@ -17,8 +18,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Application startup")
-    yield
-    logger.info("Application shutdown")
+
+    manager = ExecutionManager(max_workers=get_settings().max_concurrent_agents)
+    app.state.execution_manager = manager
+
+    try:
+        yield
+    finally:
+        logger.info("Application shutdown")
+        manager.shutdown(wait=True)
 
 
 app = FastAPI(

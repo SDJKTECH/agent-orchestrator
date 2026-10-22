@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from orchestrator.app.agent_service import AgentService
@@ -12,9 +12,9 @@ from orchestrator.app.models import Task
 from orchestrator.app.schemas import TaskCreate, TaskResponse
 from orchestrator.app.task_service import create_task
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
-
 logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 @router.post(
@@ -62,10 +62,8 @@ def _run_task_in_background(task_id: int) -> None:
         try:
             service.run_task(task_id)
         except Exception:
-            logger.exception(
-                "Background execution failed for task %s",
-                task_id,
-            )
+            # AgentService records execution failures in the database.
+            logger.exception("Background execution failed for task %s", task_id)
 
 
 @router.post(
@@ -74,7 +72,7 @@ def _run_task_in_background(task_id: int) -> None:
 )
 def run_task_endpoint(
     task_id: int,
-    background_tasks: BackgroundTasks,
+    request: Request,
     session: Session = Depends(get_db),
 ) -> dict[str, int | str]:
     task = session.get(Task, task_id)
@@ -85,7 +83,18 @@ def run_task_endpoint(
             detail=f"Task with ID {task_id} does not exist.",
         )
 
-    background_tasks.add_task(_run_task_in_background, task_id)
+    manager = request.app.state.execution_manager
+
+    try:
+        manager.submit(
+            task_id,
+            lambda: _run_task_in_background(task_id),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
 
     return {
         "task_id": task_id,

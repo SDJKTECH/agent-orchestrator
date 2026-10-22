@@ -1,4 +1,5 @@
 import subprocess
+from threading import Event
 from unittest.mock import MagicMock
 
 import pytest
@@ -218,6 +219,7 @@ def test_create_task_returns_service_unavailable_without_repository_setting(
 
 def test_run_task_endpoint_success(api_environment, monkeypatch) -> None:
     from orchestrator.app import task_routes
+    from orchestrator.app.agent_service import AgentService
 
     client, test_session, milestone_id, _, _ = api_environment
 
@@ -232,6 +234,7 @@ def test_run_task_endpoint_success(api_environment, monkeypatch) -> None:
     assert create_response.status_code == 201
 
     task_data = create_response.json()
+
     fake_runner = MagicMock()
     fake_runner.run.return_value = AgentExecutionResult(
         return_code=0,
@@ -240,12 +243,25 @@ def test_run_task_endpoint_success(api_environment, monkeypatch) -> None:
         process_id=None,
     )
 
-    from orchestrator.app.agent_service import AgentService
-
     monkeypatch.setattr(
         task_routes,
         "AgentService",
         lambda db: AgentService(db=db, runner=fake_runner),
+    )
+
+    task_completed = Event()
+    original_background_runner = task_routes._run_task_in_background
+
+    def tracked_background_runner(task_id: int) -> None:
+        try:
+            original_background_runner(task_id)
+        finally:
+            task_completed.set()
+
+    monkeypatch.setattr(
+        task_routes,
+        "_run_task_in_background",
+        tracked_background_runner,
     )
 
     response = client.post(f"/tasks/{task_data['id']}/run")
@@ -256,6 +272,7 @@ def test_run_task_endpoint_success(api_environment, monkeypatch) -> None:
     assert data["status"] == "QUEUED"
     assert data["message"] == "Agent execution has been scheduled."
 
+    assert task_completed.wait(timeout=5), "Background task execution did not finish."
     fake_runner.run.assert_called_once()
 
     with test_session() as session:
