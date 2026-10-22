@@ -61,6 +61,14 @@ class AgentService:
             raise AgentExecutionError(
                 f"Task {task_id} worktree does not exist: {worktree_path}"
             )
+        agent_definition = worktree_path / ".claude" / "agents" / "builder.md"
+
+        if not agent_definition.is_file():
+            raise AgentExecutionError(
+                "Builder agent definition not found in task worktree: "
+                f"{agent_definition}. Commit .claude/agents/builder.md "
+                "to the base branch and recreate the worktree."
+            )
 
         selected_model = model
         selected_effort = effort

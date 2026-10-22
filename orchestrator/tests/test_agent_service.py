@@ -16,6 +16,13 @@ def setup_agent_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     worktree = tmp_path / "worktree"
     worktree.mkdir()
 
+    agent_definition = worktree / ".claude" / "agents" / "builder.md"
+    agent_definition.parent.mkdir(parents=True)
+    agent_definition.write_text(
+        "---\nname: builder\ndescription: Test builder agent\n---\n",
+        encoding="utf-8",
+    )
+
     task = Task(
         id=1,
         title="Add a health endpoint",
@@ -145,3 +152,14 @@ def test_run_task_uses_builder_agent(setup_agent_service):
     assert "--agent" in command
     assert command[command.index("--agent") + 1] == "builder"
     assert result.agent_role == "builder"
+
+
+def test_run_task_rejects_missing_builder_definition(setup_agent_service):
+    context = setup_agent_service
+    agent_definition = context.worktree / ".claude" / "agents" / "builder.md"
+    agent_definition.unlink()
+
+    with pytest.raises(AgentExecutionError, match="Builder agent definition"):
+        context.service.run_task(1)
+
+    context.runner.run.assert_not_called()

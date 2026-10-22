@@ -40,11 +40,27 @@ def api_environment(tmp_path):
         check=True,
     )
 
-    (repository / "README.md").write_text("Test repository\n", encoding="utf-8")
+    (repository / "README.md").write_text(
+        "Test repository\n",
+        encoding="utf-8",
+    )
+
+    agent_definition = repository / ".claude" / "agents" / "builder.md"
+    agent_definition.parent.mkdir(parents=True)
+    agent_definition.write_text(
+        "---\n"
+        "name: builder\n"
+        "description: Test builder agent\n"
+        "---\n\n"
+        "Implement the assigned test task.\n",
+        encoding="utf-8",
+    )
+
     subprocess.run(
-        ["git", "-C", str(repository), "add", "README.md"],
+        ["git", "-C", str(repository), "add", "README.md", ".claude"],
         check=True,
     )
+
     subprocess.run(
         ["git", "-C", str(repository), "commit", "-m", "Initial commit"],
         check=True,
