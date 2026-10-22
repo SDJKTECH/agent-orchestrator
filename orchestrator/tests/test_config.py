@@ -11,6 +11,8 @@ def test_default_settings() -> None:
     assert settings.database_url == "sqlite:///./orchestrator.db"
     assert settings.max_concurrent_agents == 2
     assert settings.agent_timeout_seconds == 1800
+    assert settings.default_model == "sonnet"
+    assert settings.default_effort == "medium"
 
 
 def test_environment_variables_override_defaults(
@@ -33,3 +35,20 @@ def test_invalid_concurrency_is_rejected() -> None:
 def test_invalid_log_level_is_rejected() -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, log_level="TRACE")
+
+
+def test_model_and_effort_environment_variables_override_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEFAULT_MODEL", "opus")
+    monkeypatch.setenv("DEFAULT_EFFORT", "high")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.default_model == "opus"
+    assert settings.default_effort == "high"
+
+
+def test_invalid_default_effort_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, default_effort="invalid")

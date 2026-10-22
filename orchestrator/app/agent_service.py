@@ -10,6 +10,7 @@ from orchestrator.app.agent_runner import (
 )
 from orchestrator.app.config import get_settings
 from orchestrator.app.exceptions import AgentExecutionError
+from orchestrator.app.model_router import ModelRouter
 from orchestrator.app.models import AgentRun, Task, TaskStatus
 
 
@@ -29,6 +30,7 @@ class AgentService:
         self.db = db
         self.runner = runner or SubprocessRunner()
         self.settings = get_settings()
+        self.model_router = ModelRouter(self.settings)
 
     def run_task(
         self,
@@ -74,6 +76,13 @@ class AgentService:
                 f"{agent_definition}. Commit the agent definition to the "
                 "base branch and recreate the worktree."
             )
+
+        routing_decision = self.model_router.route(
+            model=model,
+            effort=effort,
+        )
+        model = routing_decision.model
+        effort = routing_decision.effort
 
         budget = max_budget_usd
         if budget is None:

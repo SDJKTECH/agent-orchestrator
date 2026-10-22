@@ -46,6 +46,8 @@ def setup_agent_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         claude_command="claude",
         max_task_cost_usd=1.0,
         agent_timeout_seconds=60,
+        default_model="sonnet",
+        default_effort="medium",
     )
     monkeypatch.setattr(
         "orchestrator.app.agent_service.get_settings",
@@ -195,3 +197,43 @@ def test_run_task_allows_missing_process_id(setup_agent_service):
 
     assert result.process_id is None
     assert context.task.status == TaskStatus.COMPLETED
+
+
+def test_run_task_uses_default_model_and_effort(setup_agent_service):
+    context = setup_agent_service
+
+    result = context.service.run_task(1)
+
+    command = context.runner.run.call_args.args[0]
+
+    assert command[command.index("--model") + 1] == "sonnet"
+    assert command[command.index("--effort") + 1] == "medium"
+    assert result.model == "sonnet"
+    assert result.effort == "medium"
+
+
+def test_run_task_uses_explicit_model_and_effort(setup_agent_service):
+    context = setup_agent_service
+
+    result = context.service.run_task(
+        1,
+        model="opus",
+        effort="high",
+    )
+
+    command = context.runner.run.call_args.args[0]
+
+    assert command[command.index("--model") + 1] == "opus"
+    assert command[command.index("--effort") + 1] == "high"
+    assert result.model == "opus"
+    assert result.effort == "high"
+
+
+def test_run_task_rejects_invalid_effort_before_execution(setup_agent_service):
+    context = setup_agent_service
+
+    with pytest.raises(ValueError, match="Unsupported effort level"):
+        context.service.run_task(1, effort="extreme")
+
+    context.runner.run.assert_not_called()
+    context.db.add.assert_not_called()
