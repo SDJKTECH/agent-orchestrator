@@ -87,12 +87,18 @@ def build_claude_command(
     model: str | None = None,
     effort: str | None = None,
     max_budget_usd: float | None = None,
+    agent: str | None = None,
 ) -> list[str]:
     """Build a non-interactive Claude Code CLI command."""
     if not prompt.strip():
         raise ValueError("Agent prompt cannot be empty.")
 
     command = [claude_command, "--print", "--output-format", "json"]
+
+    if agent:
+        if not agent.strip():
+            raise ValueError("Agent name cannot be empty.")
+        command.extend(["--agent", agent])
 
     if model:
         command.extend(["--model", model])

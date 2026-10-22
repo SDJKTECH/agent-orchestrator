@@ -145,3 +145,24 @@ def test_subprocess_runner_handles_startup_error(
                 cwd=tmp_path,
                 timeout_seconds=30,
             )
+
+
+def test_build_claude_command_with_agent() -> None:
+    command = build_claude_command(
+        claude_command="claude",
+        prompt="Implement a health endpoint",
+        agent="builder",
+    )
+
+    assert "--agent" in command
+    assert command[command.index("--agent") + 1] == "builder"
+    assert command[-1] == "Implement a health endpoint"
+
+
+def test_build_claude_command_rejects_empty_agent() -> None:
+    with pytest.raises(ValueError, match="Agent name"):
+        build_claude_command(
+            claude_command="claude",
+            prompt="Test task",
+            agent="   ",
+        )

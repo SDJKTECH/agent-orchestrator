@@ -133,3 +133,15 @@ def test_run_task_marks_task_failed_on_execution_error(setup_agent_service):
 
     assert context.task.status == TaskStatus.FAILED
     assert context.db.commit.call_count >= 2
+
+
+def test_run_task_uses_builder_agent(setup_agent_service):
+    context = setup_agent_service
+
+    result = context.service.run_task(1)
+
+    command = context.runner.run.call_args.args[0]
+
+    assert "--agent" in command
+    assert command[command.index("--agent") + 1] == "builder"
+    assert result.agent_role == "builder"

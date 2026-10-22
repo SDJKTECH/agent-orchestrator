@@ -37,6 +37,7 @@ class AgentService:
         model: str | None = None,
         effort: str | None = None,
         max_budget_usd: float | None = None,
+        agent_role: str = "builder",
     ) -> AgentRun:
         """Execute Claude Code for a task in its assigned worktree."""
         task = self.db.get(Task, task_id)
@@ -74,11 +75,12 @@ class AgentService:
             model=selected_model,
             effort=selected_effort,
             max_budget_usd=budget,
+            agent=agent_role,
         )
 
         agent_run = AgentRun(
             task_id=task.id,
-            agent_role="developer",
+            agent_role=agent_role,
             model=selected_model,
             effort=selected_effort,
             status="RUNNING",
