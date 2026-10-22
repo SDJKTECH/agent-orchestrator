@@ -5,3 +5,4 @@ pytest
 ruff
 httpx2
 sqlalchemy>=2.0,<3.0
+pydantic-settings
