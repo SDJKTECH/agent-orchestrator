@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 
 from orchestrator.app.config import get_settings
 from orchestrator.app.logging_config import setup_logging
+from orchestrator.app.task_routes import router as task_router
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ app = FastAPI(
     version=settings.app_version,
     lifespan=lifespan,
 )
+app.include_router(task_router)
 
 
 @app.middleware("http")
