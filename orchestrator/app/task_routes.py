@@ -1,4 +1,3 @@
-
 import logging
 from pathlib import Path
 
@@ -41,8 +40,7 @@ def create_task_endpoint(
             milestone_id=payload.milestone_id,
             title=payload.title,
             description=payload.description,
-            worktrees_root=Path(settings.repository_path).parent
-            / "agent-worktrees",
+            worktrees_root=Path(settings.repository_path).parent / "agent-worktrees",
         )
     except ValueError as exc:
         raise HTTPException(

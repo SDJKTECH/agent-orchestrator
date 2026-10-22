@@ -1,4 +1,3 @@
-
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -134,4 +133,3 @@ def test_run_task_marks_task_failed_on_execution_error(setup_agent_service):
 
     assert context.task.status == TaskStatus.FAILED
     assert context.db.commit.call_count >= 2
-
