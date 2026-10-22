@@ -84,9 +84,9 @@ class SubprocessRunner:
 
         if result.return_code != 0:
             logger.error(
-                "Agent process failed with exit code %s. stderr: %s",
+                "Agent process failed: return_code=%s process_id=%s",
                 result.return_code,
-                result.stderr[-4000:],
+                result.process_id,
             )
 
         return result

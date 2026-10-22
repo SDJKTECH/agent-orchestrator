@@ -77,6 +77,25 @@ def test_run_task_completes_successfully(setup_agent_service):
     context.runner.run.assert_called_once()
 
 
+def test_run_task_logs_execution_lifecycle(setup_agent_service, caplog):
+    context = setup_agent_service
+
+    with caplog.at_level("INFO", logger="orchestrator.app.agent_service"):
+        context.service.run_task(1)
+
+    log_output = caplog.text
+
+    assert "Agent execution started:" in log_output
+    assert "task_id=1" in log_output
+    assert "role=builder" in log_output
+    assert "model=sonnet" in log_output
+    assert "effort=medium" in log_output
+    assert "Agent execution finished:" in log_output
+    assert "status=COMPLETED" in log_output
+    assert "return_code=0" in log_output
+    assert "duration_seconds=" in log_output
+
+
 def test_run_task_marks_task_failed_on_nonzero_exit(setup_agent_service):
     context = setup_agent_service
     context.runner.run.return_value = AgentExecutionResult(

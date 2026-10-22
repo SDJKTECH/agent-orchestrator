@@ -180,3 +180,40 @@ def test_build_claude_command_rejects_empty_agent() -> None:
             prompt="Test task",
             agent="   ",
         )
+
+
+def test_subprocess_runner_does_not_log_stderr(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    runner = SubprocessRunner()
+    sensitive_stderr = "Sensitive diagnostic output"
+
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.returncode = 1
+    mock_process.communicate.return_value = (
+        "",
+        sensitive_stderr,
+    )
+
+    with patch(
+        "orchestrator.app.agent_runner.subprocess.Popen",
+        return_value=mock_process,
+    ):
+        with caplog.at_level(
+            "ERROR",
+            logger="orchestrator.app.agent_runner",
+        ):
+            result = runner.run(
+                ["fake-command"],
+                cwd=tmp_path,
+                timeout_seconds=30,
+            )
+
+    assert result.return_code == 1
+    assert result.stderr == sensitive_stderr
+    assert "Agent process failed" in caplog.text
+    assert "return_code=1" in caplog.text
+    assert "process_id=12345" in caplog.text
+    assert sensitive_stderr not in caplog.text

@@ -1,3 +1,5 @@
+import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,6 +15,8 @@ from orchestrator.app.exceptions import AgentExecutionError
 from orchestrator.app.model_router import ModelRouter
 from orchestrator.app.models import AgentRun, Task, TaskStatus
 from orchestrator.app.usage_tracker import parse_usage
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -113,6 +117,15 @@ class AgentService:
         try:
             self.db.commit()
             self.db.refresh(agent_run)
+            logger.info(
+                "Agent execution started: task_id=%s run_id=%s "
+                "role=%s model=%s effort=%s",
+                task.id,
+                agent_run.id,
+                agent_role,
+                model,
+                effort,
+            )
         except Exception as exc:
             self.db.rollback()
             raise AgentExecutionError(
@@ -120,6 +133,7 @@ class AgentService:
             ) from exc
 
         try:
+            execution_started = time.perf_counter()
             task.status = TaskStatus.RUNNING
             agent_run.status = "RUNNING"
             self.db.commit()
@@ -164,12 +178,34 @@ class AgentService:
 
             self.db.commit()
             self.db.refresh(agent_run)
+            logger.info(
+                "Agent execution finished: task_id=%s run_id=%s status=%s "
+                "return_code=%s duration_seconds=%.3f",
+                task.id,
+                agent_run.id,
+                agent_run.status,
+                result.return_code,
+                time.perf_counter() - execution_started,
+            )
             return agent_run
 
         except AgentExecutionError:
+            logger.error(
+                "Agent execution failed: task_id=%s run_id=%s duration_seconds=%.3f",
+                task.id,
+                agent_run.id,
+                time.perf_counter() - execution_started,
+            )
             self._mark_failed(task, agent_run)
             raise
         except Exception as exc:
+            logger.error(
+                "Unexpected error during agent execution: "
+                "task_id=%s run_id=%s duration_seconds=%.3f",
+                task.id,
+                agent_run.id,
+                time.perf_counter() - execution_started,
+            )
             self._mark_failed(task, agent_run)
             raise AgentExecutionError(
                 f"Unexpected error while executing task {task_id}: {exc}"
