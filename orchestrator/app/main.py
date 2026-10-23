@@ -5,19 +5,19 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 
-from orchestrator.app import task_routes
-from orchestrator.app.config import get_settings
-from orchestrator.app.control_routes import router as control_router
-from orchestrator.app.database import SessionLocal, create_tables, engine
-from orchestrator.app.execution_manager import ExecutionManager
-from orchestrator.app.github_reporter import make_reporter
-from orchestrator.app.intake_poller import IntakePoller
-from orchestrator.app.intake_routes import router as intake_router
-from orchestrator.app.logging_config import setup_logging
-from orchestrator.app.migrations import migrate_task_columns, migrate_usage_columns
-from orchestrator.app.project_routes import router as project_router
-from orchestrator.app.task_routes import router as task_router
-from orchestrator.app.usage_routes import router as usage_router
+from orchestrator.app.agents.execution_manager import ExecutionManager
+from orchestrator.app.api import task_routes
+from orchestrator.app.api.control_routes import router as control_router
+from orchestrator.app.api.intake_routes import router as intake_router
+from orchestrator.app.api.project_routes import router as project_router
+from orchestrator.app.api.task_routes import router as task_router
+from orchestrator.app.api.usage_routes import router as usage_router
+from orchestrator.app.core.config import get_settings
+from orchestrator.app.core.logging_config import setup_logging
+from orchestrator.app.db.database import SessionLocal, create_tables, engine
+from orchestrator.app.db.migrations import migrate_task_columns, migrate_usage_columns
+from orchestrator.app.github.poller import IntakePoller
+from orchestrator.app.github.reporter import make_reporter
 
 settings = get_settings()
 logger = logging.getLogger(__name__)

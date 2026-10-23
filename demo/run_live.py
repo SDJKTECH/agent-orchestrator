@@ -33,9 +33,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from run_demo import ROOT, Api, say, wait_for_server  # noqa: E402
 
-from orchestrator.app.config import Settings  # noqa: E402
-from orchestrator.app.exceptions import OrchestratorError  # noqa: E402
-from orchestrator.app.github_api import GitHubApi, detect_github_repo  # noqa: E402
+from orchestrator.app.core.config import Settings  # noqa: E402
+from orchestrator.app.core.exceptions import OrchestratorError  # noqa: E402
+from orchestrator.app.github.client import GitHubApi, detect_github_repo  # noqa: E402
 
 LABEL = "agent-task"
 REQUIRED_AGENTS = ("builder", "tester", "reviewer")

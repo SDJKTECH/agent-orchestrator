@@ -20,6 +20,28 @@ A platform for coordinating AI coding agents using Claude Code, Git branches, Gi
 - SQLite
 - FastAPI
 - Streamlit (planned)
+## Project structure
+
+```
+orchestrator/app/
+  main.py          FastAPI app and startup (uvicorn orchestrator.app.main:app)
+  core/            config, exceptions, logging
+  db/              database engine, ORM models, migrations
+  services/        task creation and usage aggregation
+  vcs/             git worktrees, commits, pushes
+  agents/          Claude command building and process runner, model routing,
+                   process control (pause/resume/cancel), job scheduling, usage parsing
+  pipeline/        builder -> tester -> reviewer pipeline, one branch per agent
+  verification/    pytest/ruff quality gate and result storage
+  github/          REST client, issue intake, polling, comments, pull requests
+  api/             HTTP routes and request/response schemas
+orchestrator/tests/   mirrors the layout above; shared helpers in helpers.py
+demo/                 run_live.py (real GitHub + Claude), run_demo.py (offline)
+```
+
+Dependencies point one way: `core` <- `db` <- `vcs`/`services`/`verification`/`agents`
+<- `pipeline`/`github` <- `api` <- `main`.
+
 ## Demo (live: real GitHub + real Claude)
 
 `demo/run_live.py` runs the orchestrator against this repository's GitHub project.

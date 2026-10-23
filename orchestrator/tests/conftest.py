@@ -7,13 +7,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from orchestrator.app.control_routes import router as control_router
-from orchestrator.app.database import Base, get_db
-from orchestrator.app.execution_manager import ExecutionManager
-from orchestrator.app.intake_routes import router as intake_router
-from orchestrator.app.models import Milestone, Project
-from orchestrator.app.project_routes import router as project_router
-from orchestrator.app.task_routes import router as task_router
+from orchestrator.app.agents.execution_manager import ExecutionManager
+from orchestrator.app.api.control_routes import router as control_router
+from orchestrator.app.api.intake_routes import router as intake_router
+from orchestrator.app.api.project_routes import router as project_router
+from orchestrator.app.api.task_routes import router as task_router
+from orchestrator.app.db.database import Base, get_db
+from orchestrator.app.db.models import Milestone, Project
 
 
 @pytest.fixture

@@ -226,9 +226,7 @@ def main() -> None:
         say(f"Starting API on port {args.port} ...")
         wait_for_server(api, server, log_file)
 
-        project = api.post(
-            "/projects", {"name": "Sample App", "local_path": str(repo)}
-        )
+        project = api.post("/projects", {"name": "Sample App", "local_path": str(repo)})
         milestone = api.post(
             f"/projects/{project['id']}/milestones",
             {"code": "M1", "title": "Demo milestone"},
