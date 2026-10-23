@@ -1,3 +1,5 @@
+# Git helpers: validate a repo, create and remove worktrees, commit and push.
+# Branch and worktree names are checked, and git is run without a shell.
 import re
 import subprocess
 from pathlib import Path

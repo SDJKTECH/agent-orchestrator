@@ -1,3 +1,5 @@
+# Gives each agent its own Git branch and worktree, and commits its work.
+# Pushes the branch when publishing is on, and names branches per attempt.
 import logging
 from dataclasses import dataclass
 from pathlib import Path

@@ -1,3 +1,5 @@
+# HTTP endpoints to create and list projects and their milestones.
+# Returns 404 for a missing project and a clear error for a duplicate name.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError

@@ -1,3 +1,5 @@
+# Stores one verification check result in the database.
+# The dashboard and the fix loop read these records.
 from sqlalchemy.orm import Session
 
 from orchestrator.app.db.models import VerificationResult

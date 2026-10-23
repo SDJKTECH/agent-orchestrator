@@ -1,3 +1,5 @@
+# HTTP endpoints that report token usage and cost.
+# Available per agent run, per task and per milestone.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 

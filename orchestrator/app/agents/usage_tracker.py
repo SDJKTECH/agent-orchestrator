@@ -1,3 +1,5 @@
+# Reads token counts, cost and session ID from Claude Code's JSON output.
+# Returns None for any value that the output does not report.
 import json
 from dataclasses import dataclass
 

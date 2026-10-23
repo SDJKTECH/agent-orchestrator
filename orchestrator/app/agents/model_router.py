@@ -1,3 +1,5 @@
+# Chooses the Claude model and effort level for each agent role.
+# Explicit arguments win, then per-role settings, then the defaults.
 from dataclasses import dataclass
 from typing import Literal
 

@@ -1,3 +1,5 @@
+# Builds the dashboard overview from the database in one snapshot.
+# Works out each task's stage states, branches, usage and milestone totals.
 from datetime import UTC, datetime
 
 from sqlalchemy import select

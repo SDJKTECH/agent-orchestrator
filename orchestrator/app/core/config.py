@@ -1,3 +1,5 @@
+# Application settings, read from environment variables and the .env file.
+# Includes models, budgets, GitHub options and the fix-attempt limit.
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal

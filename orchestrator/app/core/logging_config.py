@@ -1,3 +1,5 @@
+# Sets up application logging to the console and a rotating log file.
+# Called once when the app starts.
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path

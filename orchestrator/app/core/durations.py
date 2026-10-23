@@ -1,3 +1,5 @@
+# Helper that formats a duration in seconds as text such as '5.2s', '2m 5s' or '1h 2m'.
+# Returns 'n/a' for a missing value and rejects negative or non-finite ones.
 import math
 
 _SECONDS_PER_MINUTE = 60

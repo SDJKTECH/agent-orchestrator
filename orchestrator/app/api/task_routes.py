@@ -1,3 +1,5 @@
+# HTTP endpoints to create, list, inspect, run and start pipelines for tasks.
+# Runs the builder/tester/reviewer pipeline in the background and reports back.
 import logging
 from pathlib import Path
 from typing import Annotated

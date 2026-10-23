@@ -1,3 +1,5 @@
+# HTTP endpoints to pause, resume and cancel a task, and list active agents.
+# They act on the in-memory process registry of this API process.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session

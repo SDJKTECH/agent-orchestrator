@@ -1,3 +1,5 @@
+# Background thread that checks GitHub for new labelled issues on a timer.
+# Imports them and schedules every queued task's pipeline.
 import logging
 import threading
 from collections.abc import Callable

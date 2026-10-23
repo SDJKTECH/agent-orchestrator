@@ -1,3 +1,5 @@
+# Creates a task together with its Git branch and worktree.
+# Validates the input and cleans up if the database save fails.
 from pathlib import Path
 
 from sqlalchemy.orm import Session

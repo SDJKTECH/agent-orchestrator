@@ -1,3 +1,5 @@
+# Reads open GitHub issues (API, gh CLI or a JSON file) and turns them into tasks.
+# Each issue is imported once and filed under its GitHub milestone.
 import json
 import logging
 import subprocess

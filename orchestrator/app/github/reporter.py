@@ -1,3 +1,5 @@
+# Posts progress and result comments on a task's GitHub issue.
+# Includes the pull request link and the cost summary.
 import logging
 import subprocess
 from pathlib import Path

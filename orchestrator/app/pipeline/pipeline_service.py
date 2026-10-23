@@ -1,3 +1,5 @@
+# Runs a task through the builder, tester, checks and reviewer in order.
+# Failures go back to the builder to fix, up to the fix-attempt limit.
 import json
 import logging
 import re

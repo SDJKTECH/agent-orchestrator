@@ -1,3 +1,5 @@
+# Adds up tokens and cost from agent runs.
+# Totals are available per task and per milestone.
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

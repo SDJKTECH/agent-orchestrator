@@ -1,3 +1,5 @@
+# Creates the SQLAlchemy engine, the session factory and the declarative base.
+# Provides get_db, the session dependency used by the API routes.
 from collections.abc import Generator
 
 from sqlalchemy import create_engine

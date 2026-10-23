@@ -1,3 +1,5 @@
+# Helper that turns text into a lowercase, hyphen-separated URL slug.
+# Returns 'untitled' when nothing usable is left.
 import re
 
 _NON_ALPHANUMERIC = re.compile(r"[^a-z0-9]+")

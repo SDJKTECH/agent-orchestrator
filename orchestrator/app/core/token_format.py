@@ -1,3 +1,5 @@
+# Helper that formats a token count as short text such as '1.2K' or '2.5M'.
+# Returns 'n/a' for a missing count.
 _THOUSAND = 1_000
 _MILLION = 1_000_000
 

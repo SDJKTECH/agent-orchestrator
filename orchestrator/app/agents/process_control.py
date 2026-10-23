@@ -1,3 +1,5 @@
+# In-memory registry of running agent processes by task ID.
+# Pauses, resumes and cancels them by suspending or killing the process tree.
 import logging
 import subprocess
 import threading

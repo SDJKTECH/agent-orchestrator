@@ -1,3 +1,5 @@
+# Serves the dashboard page at GET /dashboard.
+# Also serves its data at GET /dashboard/overview.
 from functools import lru_cache
 from pathlib import Path
 

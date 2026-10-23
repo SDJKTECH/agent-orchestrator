@@ -1,3 +1,5 @@
+# ORM models for projects, milestones, tasks, agent runs and check results.
+# Also defines the task statuses and the groups of statuses used by controls.
 from datetime import UTC, datetime
 from enum import Enum
 

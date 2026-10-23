@@ -1,3 +1,5 @@
+# Pydantic request and response models shared by the API routes.
+# They define the JSON shapes the API accepts and returns.
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field

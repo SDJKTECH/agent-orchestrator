@@ -1,3 +1,5 @@
+# Runs the verification checks: pytest, ruff check and ruff format --check.
+# Each runs in a clean environment with a timeout and returns its output.
 import sys
 from dataclasses import dataclass
 from pathlib import Path

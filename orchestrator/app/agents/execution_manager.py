@@ -1,3 +1,5 @@
+# Thread pool that runs task jobs in the background, a limited number at once.
+# Refuses to schedule the same task twice and returns a Future for each job.
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Lock

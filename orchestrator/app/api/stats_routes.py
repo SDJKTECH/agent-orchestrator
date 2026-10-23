@@ -1,3 +1,5 @@
+# HTTP endpoint GET /stats: a read-only summary of tasks, tokens and cost.
+# Totals are also broken down per milestone.
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session

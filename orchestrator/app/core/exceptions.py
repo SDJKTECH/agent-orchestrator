@@ -1,3 +1,5 @@
+# Exception types for expected orchestrator failures.
+# They let the API and pipeline report problems clearly instead of crashing.
 class OrchestratorError(Exception):
     """Base exception for expected orchestrator failures."""
 

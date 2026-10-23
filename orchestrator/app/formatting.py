@@ -1,3 +1,5 @@
+# Helper that formats a USD cost as text such as '$0.42' or '$0.0031'.
+# Returns 'n/a' for a missing cost and rejects negative or non-finite ones.
 import math
 
 

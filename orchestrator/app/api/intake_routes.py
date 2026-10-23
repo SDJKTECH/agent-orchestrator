@@ -1,3 +1,5 @@
+# HTTP endpoint that imports open GitHub issues as queued tasks.
+# Issues already imported are skipped, so calling it repeatedly is safe.
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status

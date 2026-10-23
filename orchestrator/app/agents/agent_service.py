@@ -1,3 +1,5 @@
+# Runs one agent stage for a task and records its run, tokens and cost.
+# Also runs the verification checks and stores their results.
 import logging
 import time
 from dataclasses import dataclass

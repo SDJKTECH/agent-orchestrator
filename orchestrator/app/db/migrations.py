@@ -1,3 +1,5 @@
+# Adds columns that newer versions need to existing SQLite databases.
+# Safe to run on every start; it skips columns that already exist.
 from sqlalchemy import Engine, inspect, text
 
 

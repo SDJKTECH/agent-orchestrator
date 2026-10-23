@@ -1,3 +1,5 @@
+# Builds the Claude Code CLI command and runs it as a subprocess.
+# Also strips secrets from the child environment and registers the process.
 import logging
 import os
 import re

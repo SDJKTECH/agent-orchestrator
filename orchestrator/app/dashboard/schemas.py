@@ -1,3 +1,5 @@
+# Pydantic models for the dashboard's overview data.
+# Covers stages, branches, usage, milestones and the allowed actions.
 from datetime import datetime
 
 from pydantic import BaseModel

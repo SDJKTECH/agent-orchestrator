@@ -1,3 +1,5 @@
+# FastAPI application entry point (uvicorn orchestrator.app.main:app).
+# Sets up logging, the database, the issue poller and all the routers.
 import logging
 import time
 from contextlib import asynccontextmanager

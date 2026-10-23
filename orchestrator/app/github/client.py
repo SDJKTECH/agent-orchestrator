@@ -1,3 +1,5 @@
+# Small GitHub REST API client built on urllib, with an optional token.
+# Also detects the owner/name of the repository from the git remote.
 import json
 import logging
 import re

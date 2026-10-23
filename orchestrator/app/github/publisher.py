@@ -1,3 +1,5 @@
+# Opens a pull request for a task's branch, or builds a compare link.
+# Uses the REST API when a token is set, otherwise the gh CLI.
 import logging
 import subprocess
 from pathlib import Path
