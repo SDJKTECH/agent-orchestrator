@@ -22,10 +22,8 @@ def pull_request_body(task: Task) -> str:
         "Automated change produced by the agent orchestrator "
         f"(task {task.id}); the reviewer agent approved it.",
         "",
-        "Branches: "
-        f"`agent/task-{task.id}` (builder) -> "
-        f"`agent/task-{task.id}-tester` (tester) -> "
-        f"`agent/task-{task.id}-reviewer` (reviewer).",
+        f"Branch: `{task.branch_name or f'agent/task-{task.id}'}` - the builder, "
+        "tester and reviewer agents all worked on this one branch.",
     ]
 
     if task.github_issue_number:

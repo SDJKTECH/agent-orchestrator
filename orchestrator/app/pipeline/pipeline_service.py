@@ -56,9 +56,8 @@ class _Attempt:
 
 @dataclass
 class _Chain:
-    """Branches produced so far, carried from one attempt to the next."""
+    """Where each stage's work was committed, kept across fix attempts."""
 
-    tip: str | None = None
     branches: dict[str, str] = field(default_factory=dict)
     pushed: dict[str, bool] = field(default_factory=dict)
 
@@ -128,8 +127,6 @@ class PipelineService:
     def _run_attempt(
         self, task: Task, attempt: int, problem: str | None, chain: _Chain
     ) -> _Attempt:
-        previous_branch = chain.tip
-
         for role in PIPELINE_STAGES:
             if not self.control.wait_while_paused(task.id):
                 return _Attempt(status=TaskStatus.CANCELLED)
@@ -137,11 +134,7 @@ class PipelineService:
             task.current_stage = role
             self.db.commit()
 
-            workspace = (
-                self.isolation.prepare(task, role, previous_branch, attempt)
-                if self.isolation
-                else None
-            )
+            workspace = self.isolation.prepare(task, role) if self.isolation else None
 
             stage = self.agents.execute_stage(
                 task,
@@ -172,12 +165,8 @@ class PipelineService:
                 outcome = self.isolation.finish(
                     workspace, f"{role}: {task.title.strip()} (task {task.id})"
                 )
-                previous_branch = workspace.branch
                 chain.branches[role] = workspace.branch
                 chain.pushed[role] = outcome.pushed
-
-                if role != "reviewer":
-                    chain.tip = workspace.branch
 
             if role == "tester":
                 passed = self.agents.run_verification(task, stage.worktree_path)
@@ -213,7 +202,7 @@ class PipelineService:
         branches: dict[str, str],
         pushed_branches: dict[str, bool],
     ) -> None:
-        """Open a pull request from the tester branch once the reviewer approved."""
+        """Open a pull request from the task branch once the reviewer approved."""
         head = branches.get("tester")
 
         if not self.publisher or not head or not pushed_branches.get("tester"):

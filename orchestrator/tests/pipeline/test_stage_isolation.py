@@ -133,42 +133,41 @@ def test_push_branch_validates_names_and_pushes(git_environment) -> None:
     assert "agent/pushed" in remote_branches(git_environment.remote)
 
 
-def test_isolation_gives_each_agent_its_own_branch(git_environment) -> None:
+def test_isolation_lets_every_agent_work_in_the_same_branch(git_environment) -> None:
     env = git_environment
 
     with env.session_factory() as session:
         task = create_task(
             session=session,
             milestone_id=env.milestone_id,
-            title="Isolated work",
+            title="Shared work",
             worktrees_root=env.worktrees_root,
         )
         isolation = GitStageIsolation()
 
-        builder = isolation.prepare(task, "builder", None)
+        builder = isolation.prepare(task, "builder")
         (builder.worktree_path / "built.txt").write_text("built\n", encoding="utf-8")
         built = isolation.finish(builder, "builder: work")
 
-        tester = isolation.prepare(task, "tester", builder.branch)
+        tester = isolation.prepare(task, "tester")
         assert (tester.worktree_path / "built.txt").exists()
         (tester.worktree_path / "tested.txt").write_text("tested\n", encoding="utf-8")
         isolation.finish(tester, "tester: work")
 
-        reviewer = isolation.prepare(task, "reviewer", tester.branch)
+        reviewer = isolation.prepare(task, "reviewer")
 
     assert built.committed is True
     assert built.pushed is False
-    assert builder.branch == f"agent/task-{task.id}"
-    assert tester.branch == f"agent/task-{task.id}-tester"
-    assert reviewer.branch == f"agent/task-{task.id}-reviewer"
-    assert (
-        len({builder.worktree_path, tester.worktree_path, reviewer.worktree_path}) == 3
-    )
+    assert builder.branch == tester.branch == reviewer.branch == f"agent/task-{task.id}"
+    assert builder.worktree_path == tester.worktree_path == reviewer.worktree_path
     assert (reviewer.worktree_path / "tested.txt").exists()
 
-    # The builder branch never receives the tester's work.
-    assert not (builder.worktree_path / "tested.txt").exists()
-    assert git(env.repository, "branch", "--list", "agent/task-*").count("agent/") == 3
+    # One branch for the task, with one commit per agent that changed something.
+    assert git(env.repository, "branch", "--list", "agent/task-*").count("agent/") == 1
+    subjects = git(
+        env.repository, "log", "--format=%s", f"main..agent/task-{task.id}"
+    ).splitlines()
+    assert subjects == ["tester: work", "builder: work"]
 
 
 def test_isolation_publish_pushes_branch_and_survives_push_failure(
@@ -184,7 +183,7 @@ def test_isolation_publish_pushes_branch_and_survives_push_failure(
             worktrees_root=env.worktrees_root,
         )
 
-    workspace = GitStageIsolation(publish=True).prepare(task, "builder", None)
+    workspace = GitStageIsolation(publish=True).prepare(task, "builder")
     (workspace.worktree_path / "file.txt").write_text("x\n", encoding="utf-8")
 
     pushed = GitStageIsolation(publish=True).finish(workspace, "builder: x")
@@ -202,7 +201,7 @@ def test_isolation_requires_branch_and_worktree() -> None:
     task = Task(id=1, title="No worktree")
 
     with pytest.raises(RepositoryError, match="assigned branch"):
-        GitStageIsolation().prepare(task, "builder", None)
+        GitStageIsolation().prepare(task, "builder")
 
 
 def test_pipeline_end_to_end_with_real_git_branches(
@@ -264,25 +263,20 @@ def test_pipeline_end_to_end_with_real_git_branches(
     assert finished.status == TaskStatus.COMPLETED
     assert finished.pull_request_url == "https://github.com/o/r/pull/1"
 
+    branch = f"agent/task-{task_id}"
     published = remote_branches(env.remote)
-    assert {
-        f"agent/task-{task_id}",
-        f"agent/task-{task_id}-tester",
-        f"agent/task-{task_id}-reviewer",
-    } <= published
+    assert branch in published
+    assert not any(name.startswith(f"{branch}-") for name in published)
 
-    builder_files = git(
-        env.repository, "diff", "--name-only", f"main..agent/task-{task_id}"
-    )
-    tester_files = git(
-        env.repository, "diff", "--name-only", f"main..agent/task-{task_id}-tester"
-    )
-    assert "sample_app/add_greeting_helper.py" in builder_files
-    assert "tests/test_add_greeting_helper.py" not in builder_files
-    assert "tests/test_add_greeting_helper.py" in tester_files
+    changed = git(env.repository, "diff", "--name-only", f"main..{branch}")
+    assert "sample_app/add_greeting_helper.py" in changed
+    assert "tests/test_add_greeting_helper.py" in changed
 
-    head = publisher.open_pull_request.call_args.args[1]
-    assert head == f"agent/task-{task_id}-tester"
+    subjects = git(env.repository, "log", "--format=%s", f"main..{branch}")
+    assert "builder: Add greeting helper" in subjects
+    assert "tester: Add greeting helper" in subjects
+
+    assert publisher.open_pull_request.call_args.args[1] == branch
 
 
 def test_publisher_opens_pull_request_through_gh(tmp_path) -> None:
@@ -322,15 +316,3 @@ def test_publisher_returns_none_when_gh_fails(tmp_path) -> None:
 
 def test_pull_request_body_omits_close_line_without_issue() -> None:
     assert "Closes" not in pull_request_body(Task(id=1, title="t"))
-
-
-def test_stage_branch_names_follow_the_attempt() -> None:
-    from orchestrator.app.pipeline.stage_isolation import stage_branch
-
-    task = Task(id=7, title="t", branch_name="agent/task-7")
-
-    assert stage_branch(task, "builder", 1) == "agent/task-7"
-    assert stage_branch(task, "tester", 1) == "agent/task-7-tester"
-    assert stage_branch(task, "reviewer", 1) == "agent/task-7-reviewer"
-    assert stage_branch(task, "builder", 2) == "agent/task-7-builder-r2"
-    assert stage_branch(task, "tester", 3) == "agent/task-7-tester-r3"

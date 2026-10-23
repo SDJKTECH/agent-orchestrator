@@ -31,7 +31,7 @@ orchestrator/app/
   vcs/             git worktrees, commits, pushes
   agents/          Claude command building and process runner, model routing,
                    process control (pause/resume/cancel), job scheduling, usage parsing
-  pipeline/        builder -> tester -> reviewer pipeline, one branch per agent
+  pipeline/        builder -> tester -> reviewer pipeline, one branch per task
   verification/    pytest/ruff quality gate and result storage
   github/          REST client, issue intake, polling, comments, pull requests
   api/             HTTP routes and request/response schemas
@@ -60,7 +60,7 @@ every 2 seconds and shows, for every task:
   shows progress, failures, tokens and cost per milestone, and each task card shows a
   milestone chip. Issues without a milestone go to a default "GitHub issues" group.
 - **Verification:** each check (unit tests, ruff check, ruff format) with its output.
-- **GitHub links:** the issue, each agent's branch and the pull request.
+- **GitHub links:** the issue, the task's branch and the pull request.
 
 Add `?theme=dark` or `?theme=light` to override the OS theme. The data comes from
 `GET /dashboard/overview`. The dashboard has no login, so only run it on a trusted
@@ -70,24 +70,28 @@ machine or network.
 
 `demo/run_live.py` runs the orchestrator against this repository's GitHub project.
 Issues labelled `agent-task` are picked up automatically. For each issue, three
-Claude agents run one after another, **each in its own branch and Git worktree**:
+Claude agents run one after another, **all in that issue's own branch and Git
+worktree** (`agent/task-N`). Each issue gets its own branch, so two issues never
+touch each other's files:
 
-| Agent | Branch | Starts from |
+| Agent | Model / effort | Starts from |
 |---|---|---|
-| builder (sonnet/high) | `agent/task-N` | `main` |
-| tester (haiku/medium) | `agent/task-N-tester` | builder's commit |
-| reviewer (opus/high) | `agent/task-N-reviewer` | tester's commit |
+| builder | sonnet / high | `main` |
+| tester | haiku / medium | the builder's commit, same branch |
+| reviewer | opus / high | the tester's commit, same branch |
 
-The orchestrator commits each agent's work (agents never commit), pushes each
-branch to `origin`, runs the pytest/ruff gate after the tester, and - when the
-reviewer ends with `VERDICT: APPROVE` - opens a pull request from the tester
-branch into `main` with `Closes #<issue>`. It comments progress and a cost summary
-on the issue. It never merges anything.
+The orchestrator commits after each agent (agents never commit), so the branch
+history shows who changed what. It pushes the branch to `origin`, runs the
+pytest/ruff gate after the tester, and - when the reviewer ends with
+`VERDICT: APPROVE` - opens a pull request from `agent/task-N` into `main` with
+`Closes #<issue>`. It comments progress and a cost summary on the issue. It never
+merges anything.
+
 If the tester, the verification checks or the reviewer find a problem, the builder
-receives the report and fixes it in a new branch (`agent/task-N-builder-r2`, then
-`-tester-r2`, `-reviewer-r2`), and the stages run again - up to `MAX_FIX_ATTEMPTS`
-times (default 2, `--fix-attempts` in the live runner, 0 turns it off). Every attempt
-costs agent runs, so the per-task cost can be up to three times higher.
+receives the report and fixes it on the same branch, and the stages run again - up
+to `MAX_FIX_ATTEMPTS` times (default 2, `--fix-attempts` in the live runner, 0 turns
+it off). Every attempt costs agent runs, so the per-task cost can be up to three
+times higher.
 
 Tasks for different issues run in
 parallel (`MAX_CONCURRENT_AGENTS`), and you can pause/resume/cancel any of them.

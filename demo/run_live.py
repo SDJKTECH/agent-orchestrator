@@ -1,9 +1,9 @@
-"""Live demo: real GitHub issues, real Claude agents, one branch per agent.
+"""Live demo: real GitHub issues, real Claude agents, one branch per issue.
 
 Starts the orchestrator against THIS repository's GitHub project. Issues with the
 `agent-task` label are picked up; for each one a builder, tester and reviewer
-agent run in their own branches (agent/task-N, agent/task-N-tester,
-agent/task-N-reviewer). Branches are pushed with your normal git credentials.
+agent run in that issue's own branch (agent/task-N), one after another. The
+branch is pushed with your normal git credentials.
 When the reviewer approves, a pull request is opened (or, without a token, a
 compare link is shown). Nothing is merged.
 

@@ -301,8 +301,8 @@ def test_pipeline_does_not_open_pull_request_when_reviewer_rejects(pipeline) -> 
     from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
 
     isolation = MagicMock()
-    isolation.prepare.side_effect = lambda task, role, previous, attempt=1: (
-        StageWorkspace(role, f"agent/task-1-{role}", Path(task.worktree_path))
+    isolation.prepare.side_effect = lambda task, role: StageWorkspace(
+        role, "agent/task-1", Path(task.worktree_path)
     )
     isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
     publisher = MagicMock()
@@ -322,14 +322,14 @@ def test_pipeline_does_not_open_pull_request_when_reviewer_rejects(pipeline) -> 
     publisher.open_pull_request.assert_not_called()
 
 
-def test_pipeline_opens_pull_request_from_tester_branch_when_approved(
+def test_pipeline_opens_pull_request_from_the_task_branch_when_approved(
     pipeline,
 ) -> None:
     from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
 
     isolation = MagicMock()
-    isolation.prepare.side_effect = lambda task, role, previous, attempt=1: (
-        StageWorkspace(role, f"agent/task-1-{role}", Path(task.worktree_path))
+    isolation.prepare.side_effect = lambda task, role: StageWorkspace(
+        role, "agent/task-1", Path(task.worktree_path)
     )
     isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
     publisher = MagicMock()
@@ -346,17 +346,15 @@ def test_pipeline_opens_pull_request_from_tester_branch_when_approved(
 
     assert task.status == TaskStatus.COMPLETED
     assert task.pull_request_url == "https://example/pull/1"
-    publisher.open_pull_request.assert_called_once_with(task, "agent/task-1-tester")
-    previous_branches = [call.args[2] for call in isolation.prepare.call_args_list]
-    assert previous_branches == [None, "agent/task-1-builder", "agent/task-1-tester"]
+    publisher.open_pull_request.assert_called_once_with(task, "agent/task-1")
 
 
 def test_pipeline_skips_pull_request_when_branch_was_not_pushed(pipeline) -> None:
     from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
 
     isolation = MagicMock()
-    isolation.prepare.side_effect = lambda task, role, previous, attempt=1: (
-        StageWorkspace(role, f"agent/task-1-{role}", Path(task.worktree_path))
+    isolation.prepare.side_effect = lambda task, role: StageWorkspace(
+        role, "agent/task-1", Path(task.worktree_path)
     )
     isolation.finish.return_value = StageOutcome(committed=True, pushed=False)
     publisher = MagicMock()
@@ -476,14 +474,12 @@ def test_builder_failure_is_not_retried(pipeline) -> None:
     assert pipeline.calls == ["builder"]
 
 
-def test_fix_attempts_use_new_branches_and_open_the_pull_request_from_the_last(
-    pipeline,
-) -> None:
+def test_fix_attempts_reuse_the_branch_and_open_one_pull_request(pipeline) -> None:
     from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
 
     isolation = MagicMock()
-    isolation.prepare.side_effect = lambda task, role, previous, attempt=1: (
-        StageWorkspace(role, f"{role}-a{attempt}", Path(task.worktree_path))
+    isolation.prepare.side_effect = lambda task, role: StageWorkspace(
+        role, "agent/task-1", Path(task.worktree_path)
     )
     isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
     publisher = MagicMock()
@@ -503,9 +499,8 @@ def test_fix_attempts_use_new_branches_and_open_the_pull_request_from_the_last(
 
     task = service.run(1)
 
-    previous = [call.args[2] for call in isolation.prepare.call_args_list]
-    attempts = [call.args[3] for call in isolation.prepare.call_args_list]
-    assert previous == [None, "builder-a1", "tester-a1", "builder-a2", "tester-a2"]
-    assert attempts == [1, 1, 2, 2, 2]
-    publisher.open_pull_request.assert_called_once_with(task, "tester-a2")
+    roles = [call.args[1] for call in isolation.prepare.call_args_list]
+    assert roles == ["builder", "tester", "builder", "tester", "reviewer"]
+    assert {call.args[0].id for call in isolation.prepare.call_args_list} == {1}
+    publisher.open_pull_request.assert_called_once_with(task, "agent/task-1")
     assert task.pull_request_url == "https://example/pull/2"

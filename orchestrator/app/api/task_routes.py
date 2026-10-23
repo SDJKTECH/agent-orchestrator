@@ -129,7 +129,7 @@ def _run_pipeline_in_background(task_id: int) -> None:
 
 
 def _build_pipeline(session: Session) -> PipelineService:
-    """Create a pipeline whose agents each run in their own branch."""
+    """Create a pipeline whose agents all work in the task's own branch."""
     settings = get_settings()
 
     publisher = None

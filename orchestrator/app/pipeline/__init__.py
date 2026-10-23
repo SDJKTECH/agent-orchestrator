@@ -1,2 +1,2 @@
 # Pipeline package: runs a task through the builder, tester and reviewer.
-# Each agent works in its own Git branch and worktree.
+# All agents of a task work in that task's own Git branch and worktree.

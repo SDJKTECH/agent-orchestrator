@@ -119,14 +119,8 @@ def test_completed_task_shows_every_stage_done(routes_client, seeded) -> None:
     assert set(states(task).values()) == {"done"}
     assert task.stages[2].detail == "2/2 passed"
     assert task.issue_url == "https://github.com/owner/repo/issues/7"
-    assert [branch.name for branch in task.branches] == [
-        "agent/task-1",
-        "agent/task-1-tester",
-        "agent/task-1-reviewer",
-    ]
-    assert (
-        task.branches[1].url == "https://github.com/owner/repo/tree/agent/task-1-tester"
-    )
+    assert [branch.name for branch in task.branches] == ["agent/task-1"]
+    assert task.branches[0].url == "https://github.com/owner/repo/tree/agent/task-1"
     assert task.usage.input_tokens == 6
     assert task.usage.output_tokens == 12
     assert task.usage.cost_usd == pytest.approx(1.5)
@@ -285,7 +279,7 @@ def test_overview_reports_progress_and_cost_per_milestone(
     assert milestone.usage.cost_usd == pytest.approx(1.0)
 
 
-def test_fix_attempt_resets_later_stages_and_adds_branches(
+def test_fix_attempt_resets_later_stages_on_the_same_branch(
     routes_client, seeded
 ) -> None:
     seeded(
@@ -309,8 +303,4 @@ def test_fix_attempt_resets_later_stages_and_adds_branches(
         "pull_request": "pending",
     }
     assert task.stages[0].detail.endswith("attempt 2")
-    assert [branch.name for branch in task.branches] == [
-        "agent/task-1",
-        "agent/task-1-tester",
-        "agent/task-1-builder-r2",
-    ]
+    assert [branch.name for branch in task.branches] == ["agent/task-1"]

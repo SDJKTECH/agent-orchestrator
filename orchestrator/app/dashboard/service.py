@@ -26,7 +26,6 @@ from orchestrator.app.db.models import (
     Task,
     TaskStatus,
 )
-from orchestrator.app.pipeline.stage_isolation import stage_branch
 
 AGENT_ROLES = ("builder", "tester", "reviewer")
 
@@ -145,28 +144,19 @@ def _usage(runs: list[AgentRun]) -> UsageTotals:
 
 
 def _branches(task: Task, runs: list[AgentRun], repo: str | None) -> list[BranchInfo]:
-    if not task.branch_name:
+    """The task's one branch, which every agent works in; shown once work began."""
+    if not task.branch_name or not runs:
         return []
 
-    branches: dict[str, BranchInfo] = {}
-    builders_started = 0
-
-    for run in runs:
-        if run.agent_role == "builder":
-            builders_started += 1
-
-        # Each attempt starts with a builder run, so the count is the attempt.
-        name = stage_branch(task, run.agent_role, max(builders_started, 1))
-        branches.setdefault(
-            name,
-            BranchInfo(
-                role=run.agent_role,
-                name=name,
-                url=f"https://github.com/{repo}/tree/{name}" if repo else None,
+    return [
+        BranchInfo(
+            role="branch",
+            name=task.branch_name,
+            url=(
+                f"https://github.com/{repo}/tree/{task.branch_name}" if repo else None
             ),
         )
-
-    return list(branches.values())
+    ]
 
 
 def _task_view(task: Task, repo: str | None) -> DashboardTask:
