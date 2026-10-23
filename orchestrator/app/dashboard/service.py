@@ -24,6 +24,7 @@ from orchestrator.app.db.models import (
     Task,
     TaskStatus,
 )
+from orchestrator.app.pipeline.stage_isolation import stage_branch
 
 AGENT_ROLES = ("builder", "tester", "reviewer")
 
@@ -61,12 +62,23 @@ def _agent_stage(task: Task, role: str, runs: list[AgentRun]) -> StageInfo:
     latest = max(role_runs, key=lambda run: run.id)
     state = _RUN_STATE.get(latest.status, "pending")
 
+    # The builder was sent back to fix a problem, so this stage has to run again.
+    if role != "builder" and _fix_in_progress(runs, latest):
+        state = "pending"
+
     # The reviewer finished but the task still failed: it rejected the change.
     if role == "reviewer" and state == "done" and task.status == TaskStatus.FAILED:
         state = "rejected"
 
     detail = "/".join(part for part in (latest.model, latest.effort) if part)
+    if len(role_runs) > 1:
+        detail += f" · attempt {len(role_runs)}"
     return StageInfo(name=role, label=label, state=state, detail=detail or None)
+
+
+def _fix_in_progress(runs: list[AgentRun], latest: AgentRun) -> bool:
+    """True when a builder run started after `latest` (a fix is under way)."""
+    return any(run.agent_role == "builder" and run.id > latest.id for run in runs)
 
 
 def _latest_checks(task: Task) -> list[DashboardCheck]:
@@ -82,11 +94,18 @@ def _latest_checks(task: Task) -> list[DashboardCheck]:
     return list(latest.values())
 
 
-def _checks_stage(task: Task, checks: list[DashboardCheck]) -> StageInfo:
+def _checks_stage(
+    task: Task, checks: list[DashboardCheck], runs: list[AgentRun]
+) -> StageInfo:
     label = STAGE_LABELS["checks"]
 
     if task.status == TaskStatus.VERIFYING:
         return StageInfo(name="checks", label=label, state="running")
+
+    # A newer builder run than the last tester run means the checks are stale.
+    testers = [run for run in runs if run.agent_role == "tester"]
+    if testers and _fix_in_progress(runs, max(testers, key=lambda run: run.id)):
+        return StageInfo(name="checks", label=label, state="pending")
 
     if not checks:
         state = "skipped" if task.status in FINISHED_STATUSES else "pending"
@@ -127,22 +146,25 @@ def _branches(task: Task, runs: list[AgentRun], repo: str | None) -> list[Branch
     if not task.branch_name:
         return []
 
-    names = {
-        "builder": task.branch_name,
-        "tester": f"{task.branch_name}-tester",
-        "reviewer": f"{task.branch_name}-reviewer",
-    }
-    started_roles = {run.agent_role for run in runs}
+    branches: dict[str, BranchInfo] = {}
+    builders_started = 0
 
-    return [
-        BranchInfo(
-            role=role,
-            name=name,
-            url=f"https://github.com/{repo}/tree/{name}" if repo else None,
+    for run in runs:
+        if run.agent_role == "builder":
+            builders_started += 1
+
+        # Each attempt starts with a builder run, so the count is the attempt.
+        name = stage_branch(task, run.agent_role, max(builders_started, 1))
+        branches.setdefault(
+            name,
+            BranchInfo(
+                role=run.agent_role,
+                name=name,
+                url=f"https://github.com/{repo}/tree/{name}" if repo else None,
+            ),
         )
-        for role, name in names.items()
-        if role in started_roles
-    ]
+
+    return list(branches.values())
 
 
 def _task_view(task: Task, repo: str | None) -> DashboardTask:
@@ -152,7 +174,7 @@ def _task_view(task: Task, repo: str | None) -> DashboardTask:
     stages = [
         _agent_stage(task, "builder", runs),
         _agent_stage(task, "tester", runs),
-        _checks_stage(task, checks),
+        _checks_stage(task, checks, runs),
         _agent_stage(task, "reviewer", runs),
         _pull_request_stage(task),
     ]

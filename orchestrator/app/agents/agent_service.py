@@ -61,6 +61,8 @@ class AgentService:
         self.control = control or process_control
         self.runner = runner or SubprocessRunner(control=self.control)
         self.settings = get_settings()
+        # (check name, output) for each check that failed in the last verification.
+        self.last_failed_checks: list[tuple[str, str]] = []
         self.model_router = ModelRouter(self.settings)
         self.verification_runner = verification_runner or VerificationRunner(
             timeout_seconds=self.settings.verification_timeout_seconds,
@@ -123,6 +125,7 @@ class AgentService:
 
         verification_results = self.verification_runner.run_checks(worktree_path)
         verification_passed = bool(verification_results)
+        self.last_failed_checks = []
 
         for verification_result in verification_results:
             record_verification_result(
@@ -135,6 +138,9 @@ class AgentService:
 
             if not verification_result.passed:
                 verification_passed = False
+                self.last_failed_checks.append(
+                    (verification_result.check_name, verification_result.details)
+                )
 
         return verification_passed
 

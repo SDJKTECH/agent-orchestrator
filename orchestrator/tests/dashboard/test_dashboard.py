@@ -283,3 +283,34 @@ def test_overview_reports_progress_and_cost_per_milestone(
     assert milestone.failed_count == 1
     assert milestone.usage.input_tokens == 10
     assert milestone.usage.cost_usd == pytest.approx(1.0)
+
+
+def test_fix_attempt_resets_later_stages_and_adds_branches(
+    routes_client, seeded
+) -> None:
+    seeded(
+        TaskStatus.RUNNING,
+        runs=[
+            ("builder", "COMPLETED", 1),
+            ("tester", "COMPLETED", 1),
+            ("builder", "RUNNING", 1),
+        ],
+        checks=[("unit_tests", False)],
+        current_stage="builder",
+    )
+
+    task = overview(routes_client).tasks[0]
+
+    assert states(task) == {
+        "builder": "running",
+        "tester": "pending",
+        "checks": "pending",
+        "reviewer": "pending",
+        "pull_request": "pending",
+    }
+    assert task.stages[0].detail.endswith("attempt 2")
+    assert [branch.name for branch in task.branches] == [
+        "agent/task-1",
+        "agent/task-1-tester",
+        "agent/task-1-builder-r2",
+    ]

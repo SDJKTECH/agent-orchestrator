@@ -301,8 +301,8 @@ def test_pipeline_does_not_open_pull_request_when_reviewer_rejects(pipeline) -> 
     from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
 
     isolation = MagicMock()
-    isolation.prepare.side_effect = lambda task, role, previous: StageWorkspace(
-        role, f"agent/task-1-{role}", Path(task.worktree_path)
+    isolation.prepare.side_effect = lambda task, role, previous, attempt=1: (
+        StageWorkspace(role, f"agent/task-1-{role}", Path(task.worktree_path))
     )
     isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
     publisher = MagicMock()
@@ -328,8 +328,8 @@ def test_pipeline_opens_pull_request_from_tester_branch_when_approved(
     from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
 
     isolation = MagicMock()
-    isolation.prepare.side_effect = lambda task, role, previous: StageWorkspace(
-        role, f"agent/task-1-{role}", Path(task.worktree_path)
+    isolation.prepare.side_effect = lambda task, role, previous, attempt=1: (
+        StageWorkspace(role, f"agent/task-1-{role}", Path(task.worktree_path))
     )
     isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
     publisher = MagicMock()
@@ -355,8 +355,8 @@ def test_pipeline_skips_pull_request_when_branch_was_not_pushed(pipeline) -> Non
     from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
 
     isolation = MagicMock()
-    isolation.prepare.side_effect = lambda task, role, previous: StageWorkspace(
-        role, f"agent/task-1-{role}", Path(task.worktree_path)
+    isolation.prepare.side_effect = lambda task, role, previous, attempt=1: (
+        StageWorkspace(role, f"agent/task-1-{role}", Path(task.worktree_path))
     )
     isolation.finish.return_value = StageOutcome(committed=True, pushed=False)
     publisher = MagicMock()
@@ -370,3 +370,142 @@ def test_pipeline_skips_pull_request_when_branch_was_not_pushed(pipeline) -> Non
 
     assert service.run(1).status == TaskStatus.COMPLETED
     publisher.open_pull_request.assert_not_called()
+
+
+def with_fixes(pipeline, attempts: int, isolation=None) -> PipelineService:
+    return PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        isolation=isolation,
+        max_fix_attempts=attempts,
+    )
+
+
+def failing_check(details: str = "1 failed: test_x"):
+    return [SimpleNamespace(check_name="unit_tests", passed=False, details=details)]
+
+
+def test_failed_checks_send_the_task_back_to_the_builder(pipeline) -> None:
+    pipeline.verification_runner.run_checks.side_effect = [
+        failing_check(),
+        passing_checks(),
+    ]
+
+    task = with_fixes(pipeline, 2).run(1)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert pipeline.calls == [
+        "builder",
+        "tester",
+        "builder",
+        "tester",
+        "reviewer",
+    ]
+
+
+def test_fix_prompt_contains_the_failure_report(pipeline) -> None:
+    pipeline.verification_runner.run_checks.side_effect = [
+        failing_check("AssertionError in test_x"),
+        passing_checks(),
+    ]
+    prompts: list[str] = []
+    original = pipeline.runner.run.side_effect
+
+    def spy(command, **kwargs):
+        prompts.append(command[-1])
+        return original(command, **kwargs)
+
+    pipeline.runner.run.side_effect = spy
+
+    with_fixes(pipeline, 1).run(1)
+
+    fix_prompt = next(p for p in prompts if "problem was found" in p)
+    assert "[unit_tests]" in fix_prompt
+    assert "AssertionError in test_x" in fix_prompt
+
+
+def test_reviewer_rejection_is_fixed_then_reviewed_again(pipeline) -> None:
+    verdicts = iter(
+        [ok("Bug.\nVERDICT: REJECT - bug"), ok("Fixed.\nVERDICT: APPROVE - ok")]
+    )
+    pipeline.results["reviewer"] = lambda: next(verdicts)
+
+    task = with_fixes(pipeline, 1).run(1)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert pipeline.calls == [
+        "builder",
+        "tester",
+        "reviewer",
+        "builder",
+        "tester",
+        "reviewer",
+    ]
+
+
+def test_tester_failure_is_retried_through_the_builder(pipeline) -> None:
+    broken = AgentExecutionResult(return_code=1, stdout="", stderr="boom", process_id=1)
+    outcomes = iter([broken, ok("tested")])
+    pipeline.results["tester"] = lambda: next(outcomes)
+
+    task = with_fixes(pipeline, 1).run(1)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert pipeline.calls == ["builder", "tester", "builder", "tester", "reviewer"]
+
+
+def test_pipeline_gives_up_after_the_fix_attempts_are_used(pipeline) -> None:
+    pipeline.verification_runner.run_checks.return_value = failing_check()
+
+    task = with_fixes(pipeline, 2).run(1)
+
+    assert task.status == TaskStatus.FAILED
+    assert pipeline.calls == ["builder", "tester"] * 3
+    assert "reviewer" not in pipeline.calls
+
+
+def test_builder_failure_is_not_retried(pipeline) -> None:
+    pipeline.results["builder"] = AgentExecutionResult(
+        return_code=1, stdout="", stderr="crash", process_id=1
+    )
+
+    task = with_fixes(pipeline, 2).run(1)
+
+    assert task.status == TaskStatus.FAILED
+    assert pipeline.calls == ["builder"]
+
+
+def test_fix_attempts_use_new_branches_and_open_the_pull_request_from_the_last(
+    pipeline,
+) -> None:
+    from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
+
+    isolation = MagicMock()
+    isolation.prepare.side_effect = lambda task, role, previous, attempt=1: (
+        StageWorkspace(role, f"{role}-a{attempt}", Path(task.worktree_path))
+    )
+    isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
+    publisher = MagicMock()
+    publisher.open_pull_request.return_value = "https://example/pull/2"
+    pipeline.verification_runner.run_checks.side_effect = [
+        failing_check(),
+        passing_checks(),
+    ]
+    service = PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        isolation=isolation,
+        publisher=publisher,
+        max_fix_attempts=1,
+    )
+
+    task = service.run(1)
+
+    previous = [call.args[2] for call in isolation.prepare.call_args_list]
+    attempts = [call.args[3] for call in isolation.prepare.call_args_list]
+    assert previous == [None, "builder-a1", "tester-a1", "builder-a2", "tester-a2"]
+    assert attempts == [1, 1, 2, 2, 2]
+    publisher.open_pull_request.assert_called_once_with(task, "tester-a2")
+    assert task.pull_request_url == "https://example/pull/2"

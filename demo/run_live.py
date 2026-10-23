@@ -217,6 +217,12 @@ def main() -> None:
     parser.add_argument("--poll", type=int, default=15, help="poll seconds")
     parser.add_argument("--budget", type=float, default=2.0, help="USD per agent run")
     parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument(
+        "--fix-attempts",
+        type=int,
+        default=2,
+        help="times the builder may be sent back to fix a failure (0 = never)",
+    )
     parser.add_argument("--create-label", action="store_true")
     parser.add_argument("--create-issue", metavar="TITLE")
     parser.add_argument("--issue-body", default="Created for the orchestrator demo.")
@@ -242,6 +248,7 @@ def main() -> None:
     say(
         f"Agents:          {'STUB (fake claude)' if args.stub else 'real Claude'}"
         f", budget ${args.budget} per run, {args.concurrency} at once"
+        f", up to {args.fix_attempts} builder fix attempt(s)"
     )
     say(f"Push branches:   {publish}   Open PRs: {open_pr}   Comment: {comments}")
     if read_only_api:
@@ -269,6 +276,7 @@ def main() -> None:
         "CLAUDE_COMMAND": claude,
         "MAX_TASK_COST_USD": str(args.budget),
         "MAX_CONCURRENT_AGENTS": str(args.concurrency),
+        "MAX_FIX_ATTEMPTS": str(args.fix_attempts),
         "PUBLISH_BRANCHES": str(publish).lower(),
         "OPEN_PULL_REQUEST": str(open_pr).lower(),
         "COMMENT_ON_ISSUES": str(comments).lower(),

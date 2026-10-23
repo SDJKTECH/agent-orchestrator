@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     git_remote: str = "origin"
     base_branch: str = "main"
 
+    # How many times the builder may be sent back to fix problems found by the
+    # tester, the verification checks or the reviewer. 0 disables fixing.
+    max_fix_attempts: int = Field(default=2, ge=0, le=5)
+
     # Optional budget guardrail; None means no configured limit.
     max_task_cost_usd: float | None = Field(
         default=None,

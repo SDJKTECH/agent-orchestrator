@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
@@ -13,6 +14,9 @@ from orchestrator.app.pipeline.stage_isolation import StageIsolation
 logger = logging.getLogger(__name__)
 
 PIPELINE_STAGES = ("builder", "tester", "reviewer")
+
+# How much of a failure report is passed back to the builder.
+MAX_FEEDBACK_CHARS = 3000
 
 _VERDICT_PATTERN = re.compile(r"VERDICT:\s*(APPROVE|REJECT)", re.IGNORECASE)
 
@@ -36,8 +40,34 @@ def parse_verdict(stdout: str) -> str | None:
     return matches[-1].upper() if matches else None
 
 
+@dataclass
+class _Attempt:
+    """How one pass through the stages ended.
+
+    `status` is set when the pipeline must stop. Otherwise `problem` describes
+    what failed, and the builder may be asked to fix it.
+    """
+
+    status: TaskStatus | None = None
+    problem: str | None = None
+
+
+@dataclass
+class _Chain:
+    """Branches produced so far, carried from one attempt to the next."""
+
+    tip: str | None = None
+    branches: dict[str, str] = field(default_factory=dict)
+    pushed: dict[str, bool] = field(default_factory=dict)
+
+
 class PipelineService:
-    """Run a task through the builder, tester and reviewer agents in order."""
+    """Run a task through the builder, tester and reviewer agents in order.
+
+    When the tester, the verification checks or the reviewer find a problem, the
+    builder gets the report and fixes it, then the stages run again. This repeats
+    up to `max_fix_attempts` times before the task is marked failed.
+    """
 
     def __init__(
         self,
@@ -46,12 +76,14 @@ class PipelineService:
         control: ProcessControl | None = None,
         isolation: StageIsolation | None = None,
         publisher: PullRequestPublisher | None = None,
+        max_fix_attempts: int = 0,
     ) -> None:
         self.db = db
         self.control = control or process_control
         self.agents = agent_service or AgentService(db=db, control=self.control)
         self.isolation = isolation
         self.publisher = publisher
+        self.max_fix_attempts = max_fix_attempts
 
     def run(self, task_id: int) -> Task:
         """Execute every stage, stopping at the first failure or cancellation."""
@@ -65,19 +97,46 @@ class PipelineService:
             raise
 
     def _run_stages(self, task: Task) -> Task:
-        previous_branch: str | None = None
-        pushed_branches: dict[str, bool] = {}
-        branches: dict[str, str] = {}
+        chain = _Chain()
+        problem: str | None = None
+
+        for attempt in range(1, self.max_fix_attempts + 2):
+            if attempt > 1:
+                logger.info(
+                    "Sending task back to the builder: task_id=%s attempt=%s",
+                    task.id,
+                    attempt,
+                )
+                task.status = TaskStatus.RUNNING
+                self.db.commit()
+
+            outcome = self._run_attempt(task, attempt, problem, chain)
+
+            if outcome.status is None:
+                problem = outcome.problem
+                continue
+
+            if outcome.status == TaskStatus.COMPLETED:
+                self._open_pull_request(task, chain.branches, chain.pushed)
+
+            return self._finish(task, outcome.status)
+
+        return self._finish(task, TaskStatus.FAILED)
+
+    def _run_attempt(
+        self, task: Task, attempt: int, problem: str | None, chain: _Chain
+    ) -> _Attempt:
+        previous_branch = chain.tip
 
         for role in PIPELINE_STAGES:
             if not self.control.wait_while_paused(task.id):
-                return self._finish(task, TaskStatus.CANCELLED)
+                return _Attempt(status=TaskStatus.CANCELLED)
 
             task.current_stage = role
             self.db.commit()
 
             workspace = (
-                self.isolation.prepare(task, role, previous_branch)
+                self.isolation.prepare(task, role, previous_branch, attempt)
                 if self.isolation
                 else None
             )
@@ -85,48 +144,66 @@ class PipelineService:
             stage = self.agents.execute_stage(
                 task,
                 role,
-                self._build_prompt(task, role),
+                self._build_prompt(task, role, problem if attempt > 1 else None),
                 worktree_path=workspace.worktree_path if workspace else None,
             )
 
             if stage.cancelled:
-                return self._finish(task, TaskStatus.CANCELLED)
+                return _Attempt(status=TaskStatus.CANCELLED)
 
             if not stage.succeeded:
                 logger.warning(
-                    "Pipeline stopped: task_id=%s stage=%s status=%s",
+                    "Pipeline stage failed: task_id=%s stage=%s status=%s",
                     task.id,
                     role,
                     stage.agent_run.status,
                 )
-                return self._finish(task, TaskStatus.FAILED)
+                if role == "builder":
+                    return _Attempt(status=TaskStatus.FAILED)
+
+                return _Attempt(
+                    problem=f"The {role} agent did not finish.\n"
+                    + _tail(stage.result.stderr or stage.result.stdout)
+                )
 
             if self.isolation and workspace:
                 outcome = self.isolation.finish(
                     workspace, f"{role}: {task.title.strip()} (task {task.id})"
                 )
                 previous_branch = workspace.branch
-                branches[role] = workspace.branch
-                pushed_branches[role] = outcome.pushed
+                chain.branches[role] = workspace.branch
+                chain.pushed[role] = outcome.pushed
+
+                if role != "reviewer":
+                    chain.tip = workspace.branch
 
             if role == "tester":
                 passed = self.agents.run_verification(task, stage.worktree_path)
 
                 if self.control.is_cancelled(task.id):
-                    return self._finish(task, TaskStatus.CANCELLED)
+                    return _Attempt(status=TaskStatus.CANCELLED)
 
                 if not passed:
-                    return self._finish(task, TaskStatus.FAILED)
+                    return _Attempt(problem=self._verification_problem())
 
             if role == "reviewer":
                 verdict = parse_verdict(stage.result.stdout)
                 logger.info("Reviewer verdict: task_id=%s verdict=%s", task.id, verdict)
 
                 if verdict != "APPROVE":
-                    return self._finish(task, TaskStatus.FAILED)
+                    return _Attempt(
+                        problem="The reviewer did not approve the change.\n"
+                        + _tail(extract_result_text(stage.result.stdout))
+                    )
 
-        self._open_pull_request(task, branches, pushed_branches)
-        return self._finish(task, TaskStatus.COMPLETED)
+        return _Attempt(status=TaskStatus.COMPLETED)
+
+    def _verification_problem(self) -> str:
+        failures = self.agents.last_failed_checks
+        report = "\n\n".join(
+            f"[{name}]\n{_tail(details)}" for name, details in failures
+        )
+        return "These verification checks failed:\n" + report
 
     def _open_pull_request(
         self,
@@ -159,12 +236,26 @@ class PipelineService:
         return task
 
     @staticmethod
-    def _build_prompt(task: Task, role: str) -> str:
+    def _build_prompt(task: Task, role: str, problem: str | None = None) -> str:
         title = task.title.strip()
         description = (task.description or "").strip() or (
             "No additional description provided."
         )
         header = f"Task: {title}\n\nDescription:\n{description}\n\n"
+
+        if role == "builder" and problem:
+            return (
+                "You are the builder. Your earlier work on the following task was "
+                "checked and a problem was found. Your earlier work is on this "
+                "branch (committed).\n\n"
+                + header
+                + "Problem report:\n"
+                + problem
+                + "\n\nInspect the current code with `git log`, `git status` and "
+                "`git diff main...HEAD`, then fix the problem with the smallest "
+                "change that resolves it. Fix test files too if the report shows "
+                "they fail because of your change. Do not commit or push changes."
+            )
 
         if role == "builder":
             return (
@@ -201,3 +292,8 @@ class PipelineService:
             "reply with exactly one final line: `VERDICT: APPROVE` or "
             "`VERDICT: REJECT`, followed by a one-sentence reason."
         )
+
+
+def _tail(text: str | None) -> str:
+    """Keep the end of a report, where tools print the failure."""
+    return (text or "").strip()[-MAX_FEEDBACK_CHARS:]

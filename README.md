@@ -82,7 +82,14 @@ The orchestrator commits each agent's work (agents never commit), pushes each
 branch to `origin`, runs the pytest/ruff gate after the tester, and - when the
 reviewer ends with `VERDICT: APPROVE` - opens a pull request from the tester
 branch into `main` with `Closes #<issue>`. It comments progress and a cost summary
-on the issue. It never merges anything. Tasks for different issues run in
+on the issue. It never merges anything.
+If the tester, the verification checks or the reviewer find a problem, the builder
+receives the report and fixes it in a new branch (`agent/task-N-builder-r2`, then
+`-tester-r2`, `-reviewer-r2`), and the stages run again - up to `MAX_FIX_ATTEMPTS`
+times (default 2, `--fix-attempts` in the live runner, 0 turns it off). Every attempt
+costs agent runs, so the per-task cost can be up to three times higher.
+
+Tasks for different issues run in
 parallel (`MAX_CONCURRENT_AGENTS`), and you can pause/resume/cancel any of them.
 
 Prerequisites: the `claude` CLI and local `main` pushed to `origin` (agents branch

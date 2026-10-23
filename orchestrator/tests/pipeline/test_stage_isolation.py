@@ -322,3 +322,15 @@ def test_publisher_returns_none_when_gh_fails(tmp_path) -> None:
 
 def test_pull_request_body_omits_close_line_without_issue() -> None:
     assert "Closes" not in pull_request_body(Task(id=1, title="t"))
+
+
+def test_stage_branch_names_follow_the_attempt() -> None:
+    from orchestrator.app.pipeline.stage_isolation import stage_branch
+
+    task = Task(id=7, title="t", branch_name="agent/task-7")
+
+    assert stage_branch(task, "builder", 1) == "agent/task-7"
+    assert stage_branch(task, "tester", 1) == "agent/task-7-tester"
+    assert stage_branch(task, "reviewer", 1) == "agent/task-7-reviewer"
+    assert stage_branch(task, "builder", 2) == "agent/task-7-builder-r2"
+    assert stage_branch(task, "tester", 3) == "agent/task-7-tester-r3"

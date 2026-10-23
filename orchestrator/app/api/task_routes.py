@@ -141,6 +141,7 @@ def _build_pipeline(session: Session) -> PipelineService:
             remote=settings.git_remote,
         ),
         publisher=publisher,
+        max_fix_attempts=settings.max_fix_attempts,
     )
 
 

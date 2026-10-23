@@ -29,11 +29,25 @@ class StageOutcome:
     pushed: bool
 
 
+def stage_branch(task: Task, role: str, attempt: int = 1) -> str:
+    """Name of the branch an agent works in.
+
+    The first builder uses the task's own branch. Later builder attempts (fixes)
+    and every other role get `agent/task-N-<role>`, with `-rK` added from the
+    second attempt on.
+    """
+    if role == "builder" and attempt == 1:
+        return task.branch_name or f"agent/task-{task.id}"
+
+    suffix = "" if attempt == 1 else f"-r{attempt}"
+    return f"agent/task-{task.id}-{role}{suffix}"
+
+
 class StageIsolation(Protocol):
     """Gives each pipeline agent its own branch and worktree."""
 
     def prepare(
-        self, task: Task, role: str, previous_branch: str | None
+        self, task: Task, role: str, previous_branch: str | None, attempt: int = 1
     ) -> StageWorkspace: ...
 
     def finish(self, workspace: StageWorkspace, message: str) -> StageOutcome: ...
@@ -53,7 +67,7 @@ class GitStageIsolation:
         self.remote = remote
 
     def prepare(
-        self, task: Task, role: str, previous_branch: str | None
+        self, task: Task, role: str, previous_branch: str | None, attempt: int = 1
     ) -> StageWorkspace:
         if not task.worktree_path or not task.branch_name:
             raise RepositoryError(
@@ -72,14 +86,15 @@ class GitStageIsolation:
                 f"Project {project.id} does not have a local repository path."
             )
 
-        stage_id = f"task-{task.id}-{role}"
+        branch = stage_branch(task, role, attempt)
+        stage_id = branch.removeprefix("agent/")
         worktree_path = create_worktree(
             repository_path=Path(project.local_path),
             worktrees_root=task_worktree.parent,
             task_id=stage_id,
             base_branch=previous_branch,
         )
-        return StageWorkspace(role, f"agent/{stage_id}", worktree_path)
+        return StageWorkspace(role, branch, worktree_path)
 
     def finish(self, workspace: StageWorkspace, message: str) -> StageOutcome:
         committed = commit_worktree(workspace.worktree_path, message)
