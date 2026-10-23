@@ -442,8 +442,24 @@ function actionButtons(task) {
       `Cancel task ${task.id}? Its running agent will be stopped.`));
 }
 
+// Span of a task: first run start -> last run end. The end is "" while any run is unfinished,
+// which tickDurations() treats as "now".
+function taskSpan(runs) {
+  let start = null, end = null, running = false;
+  for (const run of runs) {
+    const s = run.started_at ? Date.parse(run.started_at) : NaN;
+    if (!isNaN(s) && (start === null || s < start)) start = s;
+    const f = run.finished_at ? Date.parse(run.finished_at) : NaN;
+    if (isNaN(f)) running = true;
+    else if (end === null || f > end) end = f;
+  }
+  if (start === null) return { start: "", end: "" };
+  return { start: new Date(start).toISOString(), end: running || end === null ? "" : new Date(end).toISOString() };
+}
+
 function renderCard(task) {
   const status = task.status;
+  const span = taskSpan(task.runs);
   const usage = task.usage;
   const stageNow = task.current_stage && ACTIVE.has(status)
     ? el("span", { class: "meta", text: `stage: ${task.current_stage}` }) : null;
@@ -476,6 +492,9 @@ function renderCard(task) {
     el("div", { class: "facts" },
       el("span", {}, "Tokens ", el("strong", { text: `${fmtInt(usage.input_tokens)} in / ${fmtInt(usage.output_tokens)} out` })),
       el("span", {}, "Cost ", el("strong", { text: fmtCost(usage.cost_usd) })),
+      el("span", {}, "Time ", el("strong", {
+        class: "task-time", text: "–", "data-task-start": span.start, "data-task-end": span.end,
+      })),
       branches),
     runsDetails, checksDetails);
 }
@@ -540,6 +559,11 @@ function tickDurations() {
     const start = cell.dataset.start ? Date.parse(cell.dataset.start) : null;
     const end = cell.dataset.end ? Date.parse(cell.dataset.end) : now;
     cell.textContent = start ? fmtDuration((end - start) / 1000) : "–";
+  }
+  for (const total of document.querySelectorAll("strong[data-task-start]")) {
+    const start = total.dataset.taskStart ? Date.parse(total.dataset.taskStart) : null;
+    const end = total.dataset.taskEnd ? Date.parse(total.dataset.taskEnd) : now;
+    total.textContent = start ? fmtDuration((end - start) / 1000) : "–";
   }
 }
 
