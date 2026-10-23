@@ -89,6 +89,19 @@ class VerificationResultResponse(BaseModel):
     created_at: datetime
 
 
+class VerificationCheckSummary(BaseModel):
+    check_name: str
+    passed: int
+    failed: int
+
+
+class VerificationSummaryResponse(BaseModel):
+    total_results: int
+    passed: int
+    failed: int
+    checks: list[VerificationCheckSummary]
+
+
 class TaskDetailResponse(TaskResponse):
     agent_runs: list[AgentRunUsageResponse]
     verification_results: list[VerificationResultResponse]
