@@ -217,3 +217,34 @@ def test_subprocess_runner_does_not_log_stderr(
     assert "return_code=1" in caplog.text
     assert "process_id=12345" in caplog.text
     assert sensitive_stderr not in caplog.text
+
+
+def test_split_claude_command_keeps_plain_name_and_existing_path(
+    tmp_path: Path,
+) -> None:
+    from orchestrator.app.agent_runner import split_claude_command
+
+    executable = tmp_path / "dir with spaces" / "claude.exe"
+    executable.parent.mkdir()
+    executable.write_text("", encoding="utf-8")
+
+    assert split_claude_command("claude") == ["claude"]
+    assert split_claude_command(str(executable)) == [str(executable)]
+
+
+def test_split_claude_command_splits_quoted_command_with_arguments() -> None:
+    from orchestrator.app.agent_runner import split_claude_command
+
+    command = split_claude_command('"/opt/my python/python" "/opt/stub dir/fake.py"')
+
+    assert command == ["/opt/my python/python", "/opt/stub dir/fake.py"]
+
+
+def test_build_claude_command_expands_multi_token_command() -> None:
+    command = build_claude_command(
+        claude_command='"/opt/my python/python" "/opt/fake.py"',
+        prompt="Do the task",
+    )
+
+    assert command[:3] == ["/opt/my python/python", "/opt/fake.py", "--print"]
+    assert command[-1] == "Do the task"

@@ -1,0 +1,104 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from orchestrator.app.database import get_db
+from orchestrator.app.models import Milestone, Project
+from orchestrator.app.schemas import (
+    MilestoneCreate,
+    MilestoneResponse,
+    ProjectCreate,
+    ProjectResponse,
+)
+
+router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _get_project_or_404(session: Session, project_id: int) -> Project:
+    project = session.get(Project, project_id)
+
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project with ID {project_id} does not exist.",
+        )
+
+    return project
+
+
+@router.post(
+    "",
+    response_model=ProjectResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_project_endpoint(
+    payload: ProjectCreate,
+    session: Session = Depends(get_db),
+) -> Project:
+    project = Project(
+        name=payload.name.strip(),
+        repository_url=payload.repository_url,
+        local_path=payload.local_path,
+    )
+    session.add(project)
+
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Project '{payload.name.strip()}' already exists.",
+        ) from exc
+
+    session.refresh(project)
+    return project
+
+
+@router.get("", response_model=list[ProjectResponse])
+def list_projects_endpoint(session: Session = Depends(get_db)) -> list[Project]:
+    return list(session.scalars(select(Project).order_by(Project.id)))
+
+
+@router.post(
+    "/{project_id}/milestones",
+    response_model=MilestoneResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_milestone_endpoint(
+    project_id: int,
+    payload: MilestoneCreate,
+    session: Session = Depends(get_db),
+) -> Milestone:
+    project = _get_project_or_404(session, project_id)
+
+    milestone = Milestone(
+        project_id=project.id,
+        code=payload.code.strip(),
+        title=payload.title.strip(),
+        description=payload.description,
+    )
+    session.add(milestone)
+    session.commit()
+    session.refresh(milestone)
+    return milestone
+
+
+@router.get(
+    "/{project_id}/milestones",
+    response_model=list[MilestoneResponse],
+)
+def list_milestones_endpoint(
+    project_id: int,
+    session: Session = Depends(get_db),
+) -> list[Milestone]:
+    project = _get_project_or_404(session, project_id)
+
+    return list(
+        session.scalars(
+            select(Milestone)
+            .where(Milestone.project_id == project.id)
+            .order_by(Milestone.id)
+        )
+    )

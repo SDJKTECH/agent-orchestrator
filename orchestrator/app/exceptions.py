@@ -16,3 +16,7 @@ class AgentExecutionError(OrchestratorError):
 
 class VerificationError(OrchestratorError):
     """Raised when a verification operation fails."""
+
+
+class IssueSourceError(OrchestratorError):
+    """Raised when GitHub issues cannot be retrieved."""

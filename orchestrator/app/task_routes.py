@@ -1,15 +1,20 @@
 import logging
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from orchestrator.app.agent_service import AgentService
 from orchestrator.app.config import get_settings
 from orchestrator.app.database import SessionLocal, get_db
 from orchestrator.app.exceptions import RepositoryError
-from orchestrator.app.models import Task
-from orchestrator.app.schemas import TaskCreate, TaskResponse
+from orchestrator.app.github_reporter import GhIssueReporter, outcome_message
+from orchestrator.app.models import Task, TaskStatus
+from orchestrator.app.pipeline_service import PipelineService
+from orchestrator.app.process_control import process_control
+from orchestrator.app.schemas import TaskCreate, TaskDetailResponse, TaskResponse
 from orchestrator.app.task_service import create_task
 
 logger = logging.getLogger(__name__)
@@ -101,3 +106,113 @@ def run_task_endpoint(
         "status": "QUEUED",
         "message": "Agent execution has been scheduled.",
     }
+
+
+def _run_pipeline_in_background(task_id: int) -> None:
+    """Run the builder, tester and reviewer pipeline with its own session."""
+    if process_control.is_cancelled(task_id):
+        logger.info("Pipeline skipped, task %s was cancelled before start", task_id)
+        return
+
+    with SessionLocal() as session:
+        try:
+            PipelineService(db=session).run(task_id)
+        except Exception:
+            # Failures are recorded on the task and its agent runs.
+            logger.exception("Background pipeline failed for task %s", task_id)
+        finally:
+            _report_outcome(session, task_id)
+
+
+def _report_outcome(session: Session, task_id: int) -> None:
+    """Comment the result on the task's GitHub issue, if enabled."""
+    settings = get_settings()
+
+    if not settings.comment_on_issues:
+        return
+
+    try:
+        task = session.get(Task, task_id)
+
+        if task is None or task.github_issue_number is None:
+            return
+
+        session.refresh(task)
+        GhIssueReporter(
+            repository_path=settings.repository_path,
+            github_repo=settings.github_repo,
+        ).comment(task.github_issue_number, outcome_message(task))
+    except Exception:
+        logger.exception("Could not report outcome for task %s", task_id)
+
+
+@router.post(
+    "/{task_id}/pipeline",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def run_pipeline_endpoint(
+    task_id: int,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> dict[str, int | str]:
+    """Schedule the builder -> tester -> reviewer pipeline for a task."""
+    task = session.get(Task, task_id)
+
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task with ID {task_id} does not exist.",
+        )
+
+    if task.status != TaskStatus.QUEUED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Task {task_id} cannot run from status {task.status.value}.",
+        )
+
+    manager = request.app.state.execution_manager
+
+    process_control.clear(task_id)
+
+    try:
+        manager.submit(task_id, lambda: _run_pipeline_in_background(task_id))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "task_id": task_id,
+        "status": "QUEUED",
+        "message": "Pipeline execution has been scheduled.",
+    }
+
+
+@router.get("", response_model=list[TaskResponse])
+def list_tasks_endpoint(
+    session: Session = Depends(get_db),
+    task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
+) -> list[Task]:
+    query = select(Task).order_by(Task.id)
+
+    if task_status is not None:
+        query = query.where(Task.status == task_status)
+
+    return list(session.scalars(query))
+
+
+@router.get("/{task_id}", response_model=TaskDetailResponse)
+def get_task_endpoint(
+    task_id: int,
+    session: Session = Depends(get_db),
+) -> Task:
+    task = session.get(Task, task_id)
+
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task with ID {task_id} does not exist.",
+        )
+
+    return task

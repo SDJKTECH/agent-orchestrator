@@ -85,6 +85,7 @@ class Task(Base):
     github_issue_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     branch_name: Mapped[str | None] = mapped_column(String(250), nullable=True)
     worktree_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    current_stage: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )
@@ -108,7 +109,7 @@ class AgentRun(Base):
     agent_role: Mapped[str] = mapped_column(String(50), default="builder")
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     effort: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    status: Mapped[str] = mapped_column(String(30), default="starting", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="STARTING", index=True)
     process_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     session_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)

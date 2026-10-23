@@ -1,3 +1,4 @@
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,17 +21,19 @@ class VerificationRunner:
         self,
         runner: ProcessRunner | None = None,
         timeout_seconds: int = 300,
+        ruff_target: str = "orchestrator",
     ) -> None:
         self.runner = runner or SubprocessRunner()
         self.timeout_seconds = timeout_seconds
+        self.ruff_target = ruff_target
 
     def run_checks(self, worktree: Path) -> list[VerificationCheckResult]:
         checks = [
-            ("unit_tests", ["python", "-m", "pytest", "-v"]),
-            ("ruff_check", ["python", "-m", "ruff", "check", "orchestrator"]),
+            ("unit_tests", [sys.executable, "-m", "pytest", "-v"]),
+            ("ruff_check", [sys.executable, "-m", "ruff", "check", self.ruff_target]),
             (
                 "ruff_format",
-                ["python", "-m", "ruff", "format", "--check", "orchestrator"],
+                [sys.executable, "-m", "ruff", "format", "--check", self.ruff_target],
             ),
         ]
 

@@ -403,3 +403,30 @@ def test_run_task_marks_task_failed_when_no_verification_results(
     assert context.task.status == TaskStatus.FAILED
     assert result.status == "FAILED"
     context.verification_runner.run_checks.assert_called_once_with(context.worktree)
+
+
+def test_run_task_passes_task_id_to_runner(setup_agent_service):
+    context = setup_agent_service
+
+    context.service.run_task(1)
+
+    assert context.runner.run.call_args.kwargs["task_id"] == 1
+
+
+def test_run_task_marks_cancelled_when_task_was_cancelled(setup_agent_service):
+    from orchestrator.app.process_control import ProcessControl
+
+    context = setup_agent_service
+    control = ProcessControl()
+    context.service.control = control
+    control.cancel(1)
+    context.runner.run.return_value = AgentExecutionResult(
+        return_code=1, stdout="", stderr="", process_id=7
+    )
+
+    result = context.service.run_task(1)
+
+    assert result.status == "CANCELLED"
+    assert context.task.status == TaskStatus.CANCELLED
+    assert result.finished_at is not None
+    context.verification_runner.run_checks.assert_not_called()

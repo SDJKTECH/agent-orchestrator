@@ -40,3 +40,38 @@ def test_migrate_usage_columns_adds_missing_columns(tmp_path):
 
     assert row == (12, 8)
     engine.dispose()
+
+
+def test_migrate_task_columns_adds_current_stage(tmp_path):
+    from orchestrator.app.migrations import migrate_task_columns
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy_tasks.db'}")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE tasks (id INTEGER PRIMARY KEY, title VARCHAR(250))")
+        )
+        connection.execute(text("INSERT INTO tasks (id, title) VALUES (1, 'Keep me')"))
+
+    migrate_task_columns(engine)
+    migrate_task_columns(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("tasks")}
+    assert "current_stage" in columns
+
+    with engine.connect() as connection:
+        row = connection.execute(text("SELECT title, current_stage FROM tasks")).one()
+
+    assert row == ("Keep me", None)
+    engine.dispose()
+
+
+def test_migrate_task_columns_ignores_missing_table(tmp_path):
+    from orchestrator.app.migrations import migrate_task_columns
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'empty.db'}")
+
+    migrate_task_columns(engine)
+
+    assert inspect(engine).get_table_names() == []
+    engine.dispose()

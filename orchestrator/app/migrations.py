@@ -26,3 +26,19 @@ def migrate_usage_columns(engine: Engine) -> None:
                         f"ALTER TABLE agent_runs ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+
+def migrate_task_columns(engine: Engine) -> None:
+    """Add pipeline-tracking columns to existing tasks tables."""
+    inspector = inspect(engine)
+
+    if "tasks" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("tasks")}
+
+    if "current_stage" not in existing_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE tasks ADD COLUMN current_stage VARCHAR(50)")
+            )

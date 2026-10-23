@@ -27,10 +27,14 @@ class ModelRouter:
         *,
         model: str | None = None,
         effort: str | None = None,
+        role: str | None = None,
     ) -> ModelRoutingDecision:
-        """Resolve explicit overrides against configured defaults."""
-        resolved_model = model or self.settings.default_model
-        resolved_effort = effort or self.settings.default_effort
+        """Resolve explicit overrides, then role settings, then defaults."""
+        role_model = getattr(self.settings, f"{role}_model", None) if role else None
+        role_effort = getattr(self.settings, f"{role}_effort", None) if role else None
+
+        resolved_model = model or role_model or self.settings.default_model
+        resolved_effort = effort or role_effort or self.settings.default_effort
 
         if not resolved_model.strip():
             raise ValueError("Model cannot be empty.")

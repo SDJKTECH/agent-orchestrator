@@ -1,10 +1,14 @@
 import logging
+import os
+import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from orchestrator.app.exceptions import AgentExecutionError
+from orchestrator.app.process_control import ProcessControl, process_control
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +32,19 @@ class ProcessRunner(Protocol):
         *,
         cwd: Path,
         timeout_seconds: int,
+        task_id: int | None = None,
     ) -> AgentExecutionResult: ...
 
 
 class SubprocessRunner:
-    """Execute a command without invoking a shell."""
+    """Execute a command without invoking a shell.
+
+    When a task ID is supplied the process is registered with the process
+    control so it can be paused, resumed or cancelled while it runs.
+    """
+
+    def __init__(self, control: ProcessControl | None = None) -> None:
+        self.control = control or process_control
 
     def run(
         self,
@@ -40,6 +52,7 @@ class SubprocessRunner:
         *,
         cwd: Path,
         timeout_seconds: int,
+        task_id: int | None = None,
     ) -> AgentExecutionResult:
         if not cwd.is_dir():
             raise AgentExecutionError(f"Agent working directory does not exist: {cwd}")
@@ -60,6 +73,9 @@ class SubprocessRunner:
 
             process_id = process.pid
 
+            if task_id is not None:
+                self.control.register(task_id, process)
+
             try:
                 stdout, stderr = process.communicate(timeout=timeout_seconds)
             except subprocess.TimeoutExpired as exc:
@@ -69,6 +85,9 @@ class SubprocessRunner:
                 raise AgentExecutionError(
                     f"Agent execution exceeded {timeout_seconds} seconds."
                 ) from exc
+            finally:
+                if task_id is not None:
+                    self.control.unregister(task_id)
 
         except AgentExecutionError:
             raise
@@ -92,6 +111,15 @@ class SubprocessRunner:
         return result
 
 
+def split_claude_command(claude_command: str) -> list[str]:
+    """Split a configured command into argv, keeping an executable path whole."""
+    if Path(claude_command).exists() or shutil.which(claude_command):
+        return [claude_command]
+
+    tokens = shlex.split(claude_command, posix=os.name != "nt")
+    return [token.strip("\"'") for token in tokens] or [claude_command]
+
+
 def build_claude_command(
     *,
     claude_command: str,
@@ -105,7 +133,12 @@ def build_claude_command(
     if not prompt.strip():
         raise ValueError("Agent prompt cannot be empty.")
 
-    command = [claude_command, "--print", "--output-format", "json"]
+    command = [
+        *split_claude_command(claude_command),
+        "--print",
+        "--output-format",
+        "json",
+    ]
 
     if agent:
         if not agent.strip():

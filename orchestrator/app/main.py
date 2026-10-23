@@ -5,11 +5,17 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 
+from orchestrator.app import task_routes
 from orchestrator.app.config import get_settings
-from orchestrator.app.database import create_tables, engine
+from orchestrator.app.control_routes import router as control_router
+from orchestrator.app.database import SessionLocal, create_tables, engine
 from orchestrator.app.execution_manager import ExecutionManager
+from orchestrator.app.github_reporter import GhIssueReporter
+from orchestrator.app.intake_poller import IntakePoller
+from orchestrator.app.intake_routes import router as intake_router
 from orchestrator.app.logging_config import setup_logging
-from orchestrator.app.migrations import migrate_usage_columns
+from orchestrator.app.migrations import migrate_task_columns, migrate_usage_columns
+from orchestrator.app.project_routes import router as project_router
 from orchestrator.app.task_routes import router as task_router
 from orchestrator.app.usage_routes import router as usage_router
 
@@ -22,15 +28,41 @@ async def lifespan(app: FastAPI):
     setup_logging()
     create_tables()
     migrate_usage_columns(engine)
+    migrate_task_columns(engine)
     logger.info("Application startup")
 
-    manager = ExecutionManager(max_workers=get_settings().max_concurrent_agents)
+    current = get_settings()
+    manager = ExecutionManager(max_workers=current.max_concurrent_agents)
     app.state.execution_manager = manager
+
+    poller: IntakePoller | None = None
+
+    if current.poll_interval_seconds > 0:
+        if current.repository_path is None:
+            logger.warning("Issue polling is enabled but repository_path is not set.")
+        else:
+            reporter = (
+                GhIssueReporter(current.repository_path, current.github_repo)
+                if current.comment_on_issues
+                else None
+            )
+            poller = IntakePoller(
+                settings=current,
+                session_factory=SessionLocal,
+                manager=manager,
+                run_pipeline=lambda task_id: task_routes._run_pipeline_in_background(
+                    task_id
+                ),
+                reporter=reporter,
+            )
+            poller.start()
 
     try:
         yield
     finally:
         logger.info("Application shutdown")
+        if poller is not None:
+            poller.stop()
         manager.shutdown(wait=True)
 
 
@@ -43,7 +75,10 @@ app = FastAPI(
     version=settings.app_version,
     lifespan=lifespan,
 )
+app.include_router(project_router)
+app.include_router(intake_router)
 app.include_router(task_router)
+app.include_router(control_router)
 app.include_router(usage_router)
 
 

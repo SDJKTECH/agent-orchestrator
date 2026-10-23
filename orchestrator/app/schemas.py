@@ -19,6 +19,8 @@ class TaskResponse(BaseModel):
     title: str
     description: str
     status: TaskStatus
+    github_issue_number: int | None = None
+    current_stage: str | None = None
     branch_name: str | None
     worktree_path: str | None
     created_at: datetime
@@ -55,3 +57,63 @@ class UsageSummaryResponse(BaseModel):
     estimated_cost: float
     reported_cost_run_count: int
     estimated_cost_run_count: int
+
+
+class VerificationResultResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    check_name: str
+    passed: bool
+    details: str
+    created_at: datetime
+
+
+class TaskDetailResponse(TaskResponse):
+    agent_runs: list[AgentRunUsageResponse]
+    verification_results: list[VerificationResultResponse]
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=150)
+    repository_url: str | None = Field(default=None, max_length=500)
+    local_path: str | None = Field(default=None, max_length=1000)
+
+
+class ProjectResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    repository_url: str | None
+    local_path: str | None
+    created_at: datetime
+
+
+class MilestoneCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=20)
+    title: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+
+
+class MilestoneResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    code: str
+    title: str
+    description: str | None
+    status: str
+
+
+class SyncResponse(BaseModel):
+    imported: list[TaskResponse]
+    skipped_issue_numbers: list[int]
+    failed: dict[int, str]
+
+
+class ControlResponse(BaseModel):
+    task_id: int
+    status: TaskStatus
+    message: str

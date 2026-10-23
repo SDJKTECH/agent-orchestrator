@@ -1,11 +1,13 @@
 import logging
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from orchestrator.app.agent_runner import (
+    AgentExecutionResult,
     ProcessRunner,
     SubprocessRunner,
     build_claude_command,
@@ -14,6 +16,7 @@ from orchestrator.app.config import get_settings
 from orchestrator.app.exceptions import AgentExecutionError
 from orchestrator.app.model_router import ModelRouter
 from orchestrator.app.models import AgentRun, Task, TaskStatus
+from orchestrator.app.process_control import ProcessControl, process_control
 from orchestrator.app.usage_tracker import parse_usage
 from orchestrator.app.verification_runner import VerificationRunner
 from orchestrator.app.verification_service import record_verification_result
@@ -26,6 +29,23 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+@dataclass
+class StageResult:
+    """Outcome of one agent process executed for a task."""
+
+    agent_run: AgentRun
+    result: AgentExecutionResult
+    worktree_path: Path
+
+    @property
+    def succeeded(self) -> bool:
+        return self.agent_run.status == "COMPLETED"
+
+    @property
+    def cancelled(self) -> bool:
+        return self.agent_run.status == "CANCELLED"
+
+
 class AgentService:
     """Manage agent execution and synchronize its state with the database."""
 
@@ -34,13 +54,16 @@ class AgentService:
         db: Session,
         runner: ProcessRunner | None = None,
         verification_runner: VerificationRunner | None = None,
+        control: ProcessControl | None = None,
     ) -> None:
         self.db = db
-        self.runner = runner or SubprocessRunner()
+        self.control = control or process_control
+        self.runner = runner or SubprocessRunner(control=self.control)
         self.settings = get_settings()
         self.model_router = ModelRouter(self.settings)
         self.verification_runner = verification_runner or VerificationRunner(
             timeout_seconds=self.settings.verification_timeout_seconds,
+            ruff_target=self.settings.verification_ruff_target,
         )
 
     def run_task(
@@ -53,6 +76,33 @@ class AgentService:
         agent_role: str = "builder",
     ) -> AgentRun:
         """Execute Claude Code for a task in its assigned worktree."""
+        task = self.load_runnable_task(task_id)
+
+        stage = self.execute_stage(
+            task,
+            agent_role,
+            self._build_prompt(task),
+            model=model,
+            effort=effort,
+            max_budget_usd=max_budget_usd,
+        )
+        agent_run = stage.agent_run
+
+        if not stage.succeeded:
+            return agent_run
+
+        if self.run_verification(task, stage.worktree_path):
+            task.status = TaskStatus.COMPLETED
+        else:
+            agent_run.status = "FAILED"
+            task.status = TaskStatus.FAILED
+
+        self.db.commit()
+        self.db.refresh(agent_run)
+        return agent_run
+
+    def load_runnable_task(self, task_id: int) -> Task:
+        """Return a task that is allowed to start running."""
         task = self.db.get(Task, task_id)
 
         if task is None:
@@ -62,6 +112,47 @@ class AgentService:
             raise ValueError(
                 f"Task {task_id} cannot run from status {task.status.value}."
             )
+
+        return task
+
+    def run_verification(self, task: Task, worktree_path: Path) -> bool:
+        """Run the verification gate and persist each check result."""
+        task.status = TaskStatus.VERIFYING
+        self.db.commit()
+
+        verification_results = self.verification_runner.run_checks(worktree_path)
+        verification_passed = bool(verification_results)
+
+        for verification_result in verification_results:
+            record_verification_result(
+                session=self.db,
+                task_id=task.id,
+                check_name=verification_result.check_name,
+                passed=verification_result.passed,
+                details=verification_result.details,
+            )
+
+            if not verification_result.passed:
+                verification_passed = False
+
+        return verification_passed
+
+    def execute_stage(
+        self,
+        task: Task,
+        agent_role: str,
+        prompt: str,
+        *,
+        model: str | None = None,
+        effort: str | None = None,
+        max_budget_usd: float | None = None,
+    ) -> StageResult:
+        """Run one agent process for a task and record its run and usage.
+
+        A successful stage leaves the task RUNNING; failures and cancellations
+        are written to the task as well.
+        """
+        task_id = task.id
 
         if not task.worktree_path:
             raise AgentExecutionError(
@@ -91,6 +182,7 @@ class AgentService:
         routing_decision = self.model_router.route(
             model=model,
             effort=effort,
+            role=agent_role,
         )
         model = routing_decision.model
         effort = routing_decision.effort
@@ -101,7 +193,7 @@ class AgentService:
 
         command = build_claude_command(
             claude_command=self.settings.claude_command,
-            prompt=self._build_prompt(task),
+            prompt=prompt,
             model=model,
             effort=effort,
             max_budget_usd=budget,
@@ -148,6 +240,7 @@ class AgentService:
                 command,
                 cwd=worktree_path,
                 timeout_seconds=self.settings.agent_timeout_seconds,
+                task_id=task.id,
             )
 
             usage = parse_usage(result.stdout)
@@ -174,33 +267,11 @@ class AgentService:
 
             agent_run.process_id = result.process_id
 
-            if result.return_code == 0:
-                task.status = TaskStatus.VERIFYING
-                self.db.commit()
-
-                verification_results = self.verification_runner.run_checks(
-                    worktree_path
-                )
-                verification_passed = bool(verification_results)
-
-                for verification_result in verification_results:
-                    record_verification_result(
-                        session=self.db,
-                        task_id=task.id,
-                        check_name=verification_result.check_name,
-                        passed=verification_result.passed,
-                        details=verification_result.details,
-                    )
-
-                    if not verification_result.passed:
-                        verification_passed = False
-
-                if verification_passed:
-                    agent_run.status = "COMPLETED"
-                    task.status = TaskStatus.COMPLETED
-                else:
-                    agent_run.status = "FAILED"
-                    task.status = TaskStatus.FAILED
+            if self.control.is_cancelled(task.id):
+                agent_run.status = "CANCELLED"
+                task.status = TaskStatus.CANCELLED
+            elif result.return_code == 0:
+                agent_run.status = "COMPLETED"
             else:
                 agent_run.status = "FAILED"
                 task.status = TaskStatus.FAILED
@@ -217,7 +288,11 @@ class AgentService:
                 result.return_code,
                 time.perf_counter() - execution_started,
             )
-            return agent_run
+            return StageResult(
+                agent_run=agent_run,
+                result=result,
+                worktree_path=worktree_path,
+            )
 
         except AgentExecutionError:
             logger.error(

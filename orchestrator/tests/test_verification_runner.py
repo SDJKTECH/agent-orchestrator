@@ -73,3 +73,18 @@ def test_verification_runner_continues_after_failed_check(
     assert results[1].passed is False
     assert results[2].passed is True
     assert runner.run.call_count == 3
+
+
+def test_verification_runner_uses_current_python_and_ruff_target(tmp_path):
+    import sys
+
+    runner = MagicMock()
+    runner.run.return_value = AgentExecutionResult(0, "ok", "", None)
+    verification_runner = VerificationRunner(runner=runner, ruff_target="src")
+
+    verification_runner.run_checks(tmp_path)
+
+    commands = [call.args[0] for call in runner.run.call_args_list]
+    assert all(command[0] == sys.executable for command in commands)
+    assert commands[1][-1] == "src"
+    assert commands[2][-2:] == ["--check", "src"]

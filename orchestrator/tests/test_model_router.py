@@ -38,3 +38,25 @@ def test_router_rejects_invalid_effort() -> None:
 
     with pytest.raises(ValueError, match="Unsupported effort"):
         router.route(effort="invalid")
+
+
+def test_router_uses_role_settings_between_override_and_default() -> None:
+    settings = Settings(_env_file=None)
+    router = ModelRouter(settings)
+
+    builder = router.route(role="builder")
+    tester = router.route(role="tester")
+    reviewer = router.route(role="reviewer")
+    override = router.route(role="reviewer", model="sonnet", effort="low")
+
+    assert (builder.model, builder.effort) == ("sonnet", "high")
+    assert (tester.model, tester.effort) == ("haiku", "medium")
+    assert (reviewer.model, reviewer.effort) == ("opus", "high")
+    assert (override.model, override.effort) == ("sonnet", "low")
+
+
+def test_router_falls_back_to_defaults_for_unknown_role() -> None:
+    decision = ModelRouter(Settings(_env_file=None)).route(role="architect")
+
+    assert decision.model == "sonnet"
+    assert decision.effort == "medium"
