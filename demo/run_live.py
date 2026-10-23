@@ -298,9 +298,9 @@ def main() -> None:
     try:
         say("Starting the orchestrator ...")
         wait_for_server(server_api, server, log_file)
-        say(
-            f"Running at {server_api.base_url}/docs (Ctrl+C to stop; log: {log_file})\n"
-        )
+        say(f"Dashboard:  {server_api.base_url}/dashboard   <- open this in a browser")
+        say(f"API docs:   {server_api.base_url}/docs   (Ctrl+C to stop)")
+        say(f"Server log: {log_file}\n")
         say(f"Add the '{LABEL}' label to an issue on GitHub to start an agent run.\n")
 
         last = ""

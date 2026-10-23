@@ -31,6 +31,12 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+# Which statuses allow which control action (shared by the API and dashboard).
+PAUSABLE_STATUSES = {TaskStatus.STARTING, TaskStatus.RUNNING, TaskStatus.VERIFYING}
+CANCELLABLE_STATUSES = PAUSABLE_STATUSES | {TaskStatus.QUEUED, TaskStatus.PAUSED}
+FINISHED_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+
+
 class Project(Base):
     __tablename__ = "projects"
 

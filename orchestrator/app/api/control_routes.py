@@ -5,13 +5,17 @@ from sqlalchemy.orm import Session
 from orchestrator.app.agents.process_control import process_control
 from orchestrator.app.api.schemas import AgentRunUsageResponse, ControlResponse
 from orchestrator.app.db.database import get_db
-from orchestrator.app.db.models import AgentRun, Task, TaskStatus
+from orchestrator.app.db.models import (
+    CANCELLABLE_STATUSES,
+    PAUSABLE_STATUSES,
+    AgentRun,
+    Task,
+    TaskStatus,
+)
 
 router = APIRouter(tags=["control"])
 
 ACTIVE_RUN_STATUSES = ("STARTING", "RUNNING", "PAUSED")
-PAUSABLE = {TaskStatus.STARTING, TaskStatus.RUNNING, TaskStatus.VERIFYING}
-CANCELLABLE = PAUSABLE | {TaskStatus.QUEUED, TaskStatus.PAUSED}
 
 
 def _get_task_or_404(session: Session, task_id: int) -> Task:
@@ -51,7 +55,7 @@ def pause_task_endpoint(
     session: Session = Depends(get_db),
 ) -> ControlResponse:
     task = _get_task_or_404(session, task_id)
-    _require_status(task, PAUSABLE, "pause")
+    _require_status(task, PAUSABLE_STATUSES, "pause")
 
     process_control.pause(task_id)
     task.status = TaskStatus.PAUSED
@@ -88,7 +92,7 @@ def cancel_task_endpoint(
     session: Session = Depends(get_db),
 ) -> ControlResponse:
     task = _get_task_or_404(session, task_id)
-    _require_status(task, CANCELLABLE, "cancel")
+    _require_status(task, CANCELLABLE_STATUSES, "cancel")
 
     process_control.cancel(task_id)
     task.status = TaskStatus.CANCELLED

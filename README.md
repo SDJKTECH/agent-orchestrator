@@ -35,12 +35,32 @@ orchestrator/app/
   verification/    pytest/ruff quality gate and result storage
   github/          REST client, issue intake, polling, comments, pull requests
   api/             HTTP routes and request/response schemas
+  dashboard/       monitoring dashboard (page, overview endpoint, stage logic)
 orchestrator/tests/   mirrors the layout above; shared helpers in helpers.py
 demo/                 run_live.py (real GitHub + Claude), run_demo.py (offline)
 ```
 
 Dependencies point one way: `core` <- `db` <- `vcs`/`services`/`verification`/`agents`
 <- `pipeline`/`github` <- `api` <- `main`.
+
+## Dashboard
+
+Open `http://127.0.0.1:8000/dashboard` while the orchestrator is running. It refreshes
+every 2 seconds and shows, for every task:
+
+- **Progress by stage:** Builder -> Tester -> Checks -> Reviewer -> Pull request, each
+  marked pending / running / paused / done / failed / rejected / cancelled / skipped,
+  with the model and effort each agent used.
+- **Controls:** Start (queued tasks), Pause, Resume and Cancel, plus **Sync issues** to
+  import new GitHub issues immediately.
+- **Cost and tokens:** per agent run, per task and in total (input, output, cache, USD),
+  and how many agents are running out of the allowed maximum.
+- **Verification:** each check (unit tests, ruff check, ruff format) with its output.
+- **GitHub links:** the issue, each agent's branch and the pull request.
+
+Add `?theme=dark` or `?theme=light` to override the OS theme. The data comes from
+`GET /dashboard/overview`. The dashboard has no login, so only run it on a trusted
+machine or network.
 
 ## Demo (live: real GitHub + real Claude)
 

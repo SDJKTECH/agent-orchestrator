@@ -14,6 +14,7 @@ from orchestrator.app.api.task_routes import router as task_router
 from orchestrator.app.api.usage_routes import router as usage_router
 from orchestrator.app.core.config import get_settings
 from orchestrator.app.core.logging_config import setup_logging
+from orchestrator.app.dashboard.routes import router as dashboard_router
 from orchestrator.app.db.database import SessionLocal, create_tables, engine
 from orchestrator.app.db.migrations import migrate_task_columns, migrate_usage_columns
 from orchestrator.app.github.poller import IntakePoller
@@ -71,6 +72,7 @@ app = FastAPI(
     version=settings.app_version,
     lifespan=lifespan,
 )
+app.include_router(dashboard_router)
 app.include_router(project_router)
 app.include_router(intake_router)
 app.include_router(task_router)

@@ -225,6 +225,7 @@ def main() -> None:
     try:
         say(f"Starting API on port {args.port} ...")
         wait_for_server(api, server, log_file)
+        say(f"Live dashboard while it runs: {api.base_url}/dashboard")
 
         project = api.post("/projects", {"name": "Sample App", "local_path": str(repo)})
         milestone = api.post(
