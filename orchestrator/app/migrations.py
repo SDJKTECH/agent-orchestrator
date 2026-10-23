@@ -37,8 +37,14 @@ def migrate_task_columns(engine: Engine) -> None:
 
     existing_columns = {column["name"] for column in inspector.get_columns("tasks")}
 
-    if "current_stage" not in existing_columns:
-        with engine.begin() as connection:
-            connection.execute(
-                text("ALTER TABLE tasks ADD COLUMN current_stage VARCHAR(50)")
-            )
+    migrations = {
+        "current_stage": "VARCHAR(50)",
+        "pull_request_url": "VARCHAR(500)",
+    }
+
+    with engine.begin() as connection:
+        for column_name, column_type in migrations.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    text(f"ALTER TABLE tasks ADD COLUMN {column_name} {column_type}")
+                )

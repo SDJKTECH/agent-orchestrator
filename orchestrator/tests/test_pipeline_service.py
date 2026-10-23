@@ -293,3 +293,78 @@ def test_extract_result_text_falls_back_to_raw_output() -> None:
     assert extract_result_text("plain") == "plain"
     assert extract_result_text('{"other": 1}') == '{"other": 1}'
     assert extract_result_text(json.dumps({"result": "text"})) == "text"
+
+
+def test_pipeline_does_not_open_pull_request_when_reviewer_rejects(pipeline) -> None:
+    from orchestrator.app.stage_isolation import StageOutcome, StageWorkspace
+
+    isolation = MagicMock()
+    isolation.prepare.side_effect = lambda task, role, previous: StageWorkspace(
+        role, f"agent/task-1-{role}", Path(task.worktree_path)
+    )
+    isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
+    publisher = MagicMock()
+    service = PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        isolation=isolation,
+        publisher=publisher,
+    )
+    pipeline.results["reviewer"] = ok("Bad.\nVERDICT: REJECT - bug")
+
+    task = service.run(1)
+
+    assert task.status == TaskStatus.FAILED
+    assert isolation.finish.call_count == 3
+    publisher.open_pull_request.assert_not_called()
+
+
+def test_pipeline_opens_pull_request_from_tester_branch_when_approved(
+    pipeline,
+) -> None:
+    from orchestrator.app.stage_isolation import StageOutcome, StageWorkspace
+
+    isolation = MagicMock()
+    isolation.prepare.side_effect = lambda task, role, previous: StageWorkspace(
+        role, f"agent/task-1-{role}", Path(task.worktree_path)
+    )
+    isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
+    publisher = MagicMock()
+    publisher.open_pull_request.return_value = "https://example/pull/1"
+    service = PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        isolation=isolation,
+        publisher=publisher,
+    )
+
+    task = service.run(1)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert task.pull_request_url == "https://example/pull/1"
+    publisher.open_pull_request.assert_called_once_with(task, "agent/task-1-tester")
+    previous_branches = [call.args[2] for call in isolation.prepare.call_args_list]
+    assert previous_branches == [None, "agent/task-1-builder", "agent/task-1-tester"]
+
+
+def test_pipeline_skips_pull_request_when_branch_was_not_pushed(pipeline) -> None:
+    from orchestrator.app.stage_isolation import StageOutcome, StageWorkspace
+
+    isolation = MagicMock()
+    isolation.prepare.side_effect = lambda task, role, previous: StageWorkspace(
+        role, f"agent/task-1-{role}", Path(task.worktree_path)
+    )
+    isolation.finish.return_value = StageOutcome(committed=True, pushed=False)
+    publisher = MagicMock()
+    service = PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        isolation=isolation,
+        publisher=publisher,
+    )
+
+    assert service.run(1).status == TaskStatus.COMPLETED
+    publisher.open_pull_request.assert_not_called()

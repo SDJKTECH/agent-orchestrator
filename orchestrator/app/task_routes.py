@@ -10,11 +10,13 @@ from orchestrator.app.agent_service import AgentService
 from orchestrator.app.config import get_settings
 from orchestrator.app.database import SessionLocal, get_db
 from orchestrator.app.exceptions import RepositoryError
+from orchestrator.app.github_publisher import GhPullRequestPublisher
 from orchestrator.app.github_reporter import GhIssueReporter, outcome_message
 from orchestrator.app.models import Task, TaskStatus
 from orchestrator.app.pipeline_service import PipelineService
 from orchestrator.app.process_control import process_control
 from orchestrator.app.schemas import TaskCreate, TaskDetailResponse, TaskResponse
+from orchestrator.app.stage_isolation import GitStageIsolation
 from orchestrator.app.task_service import create_task
 
 logger = logging.getLogger(__name__)
@@ -116,12 +118,34 @@ def _run_pipeline_in_background(task_id: int) -> None:
 
     with SessionLocal() as session:
         try:
-            PipelineService(db=session).run(task_id)
+            _build_pipeline(session).run(task_id)
         except Exception:
             # Failures are recorded on the task and its agent runs.
             logger.exception("Background pipeline failed for task %s", task_id)
         finally:
             _report_outcome(session, task_id)
+
+
+def _build_pipeline(session: Session) -> PipelineService:
+    """Create a pipeline whose agents each run in their own branch."""
+    settings = get_settings()
+
+    publisher = None
+    if settings.publish_branches and settings.open_pull_request:
+        publisher = GhPullRequestPublisher(
+            repository_path=settings.repository_path,
+            github_repo=settings.github_repo,
+            base_branch=settings.base_branch,
+        )
+
+    return PipelineService(
+        db=session,
+        isolation=GitStageIsolation(
+            publish=settings.publish_branches,
+            remote=settings.git_remote,
+        ),
+        publisher=publisher,
+    )
 
 
 def _report_outcome(session: Session, task_id: int) -> None:

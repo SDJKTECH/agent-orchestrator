@@ -44,6 +44,7 @@ def validate_repository(repository_path: Path) -> Path:
 def _run_git(
     repository_path: Path,
     *args: str,
+    timeout: int = 30,
 ) -> str:
     """Run a Git command and return its standard output."""
     try:
@@ -52,7 +53,7 @@ def _run_git(
             capture_output=True,
             text=True,
             check=True,
-            timeout=30,
+            timeout=timeout,
         )
         return result.stdout.strip()
     except FileNotFoundError as exc:
@@ -240,3 +241,44 @@ def remove_worktree(
             "-d",
             expected_branch,
         )
+
+
+def _identity_args(path: Path) -> list[str]:
+    """Supply a commit identity only when the repository has none configured."""
+    args: list[str] = []
+
+    for key, default in (
+        ("user.name", "Agent Orchestrator"),
+        ("user.email", "agent-orchestrator@localhost"),
+    ):
+        try:
+            configured = _run_git(path, "config", "--get", key)
+        except RepositoryError:
+            configured = ""
+
+        if not configured:
+            args.extend(["-c", f"{key}={default}"])
+
+    return args
+
+
+def commit_worktree(worktree_path: Path, message: str) -> bool:
+    """Commit every change in a worktree. Return False if there was nothing."""
+    if not message.strip():
+        raise RepositoryError("Commit message cannot be empty.")
+
+    if not _run_git(worktree_path, "status", "--porcelain"):
+        return False
+
+    _run_git(worktree_path, "add", "-A")
+    _run_git(worktree_path, *_identity_args(worktree_path), "commit", "-m", message)
+    return True
+
+
+def push_branch(worktree_path: Path, branch: str, remote: str = "origin") -> None:
+    """Push a branch and set its upstream."""
+    for value in (branch, remote):
+        if not re.fullmatch(r"[A-Za-z0-9._/-]+", value) or value.startswith("-"):
+            raise RepositoryError(f"Invalid branch or remote name: {value}")
+
+    _run_git(worktree_path, "push", "-u", remote, branch, timeout=120)

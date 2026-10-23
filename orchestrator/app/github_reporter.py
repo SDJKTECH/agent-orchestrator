@@ -74,5 +74,8 @@ def outcome_message(task: Task) -> str:
             for result in task.verification_results
         )
 
+    if task.pull_request_url:
+        lines.extend(["", f"Pull request: {task.pull_request_url}"])
+
     lines.extend(["", f"Total reported cost: ${total_cost:.4f}"])
     return "\n".join(lines)

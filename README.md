@@ -20,27 +20,48 @@ A platform for coordinating AI coding agents using Claude Code, Git branches, Gi
 - SQLite
 - FastAPI
 - Streamlit (planned)
-## Demo
+## Demo (live: real GitHub + real Claude)
 
-The demo imports issues as tasks, then runs a **builder -> tester -> reviewer**
-pipeline for each one in parallel, each task in its own branch and Git worktree.
-It shows live status, per-role model/effort routing, pause/resume, cancel,
-token and cost tracking, and verification results.
+`demo/run_live.py` runs the orchestrator against this repository's GitHub project.
+Issues labelled `agent-task` are picked up automatically. For each issue, three
+Claude agents run one after another, **each in its own branch and Git worktree**:
+
+| Agent | Branch | Starts from |
+|---|---|---|
+| builder (sonnet/high) | `agent/task-N` | `main` |
+| tester (haiku/medium) | `agent/task-N-tester` | builder's commit |
+| reviewer (opus/high) | `agent/task-N-reviewer` | tester's commit |
+
+The orchestrator commits each agent's work (agents never commit), pushes each
+branch to `origin`, runs the pytest/ruff gate after the tester, and - when the
+reviewer ends with `VERDICT: APPROVE` - opens a pull request from the tester
+branch into `main` with `Closes #<issue>`. It comments progress and a cost summary
+on the issue. It never merges anything. Tasks for different issues run in
+parallel (`MAX_CONCURRENT_AGENTS`), and you can pause/resume/cancel any of them.
+
+Prerequisites: `gh` installed and signed in (`gh auth login`), the `claude` CLI,
+and local `main` pushed to `origin` (agents branch from local `main`).
 
 ```
-pip install -r requirements.txt
-python demo/run_demo.py            # offline, free (uses demo/fake_claude.py)
-python demo/run_demo.py --delay 10 # slower agents, easier to watch
-python demo/run_demo.py --keep     # leave the API running at http://127.0.0.1:8765/docs
+python demo/run_live.py --create-label
+python demo/run_live.py --create-issue "Add a module docstring to exceptions.py"
+python demo/run_live.py                 # start the orchestrator and watch
 ```
 
-Issues come from `demo/issues.json` (same shape as `gh issue list --json`).
-Issue #104 contains `DEMO:REJECT`, which makes the stub reviewer reject it so you
-can see the review gate fail a task. To use real GitHub issues set
-`ISSUE_SOURCE=gh` (requires an authenticated `gh` CLI; optional `GITHUB_REPO`).
+Useful switches: `--no-publish` (no pushes), `--no-pr`, `--no-comments`,
+`--budget 1.0` (USD cap per agent run), `--poll 15`. It costs money and writes to
+GitHub, so it asks for confirmation first (`--yes` skips that).
 
-Real Claude Code (costs money): `python demo/run_demo.py --real --issues <file>`.
-Set `MAX_TASK_COST_USD` as a per-run budget guardrail.
+### Offline mode (no GitHub, no Claude, no cost)
+
+`demo/run_demo.py` runs the same pipeline against a throwaway local repo with a
+stub standing in for Claude (`demo/fake_claude.py`) and issues from
+`demo/issues.json`. It also demonstrates pause, resume and cancel. Issue #104
+contains `DEMO:REJECT` so the stub reviewer rejects it.
+
+```
+python demo/run_demo.py [--delay 10] [--keep]
+```
 
 ### API summary
 

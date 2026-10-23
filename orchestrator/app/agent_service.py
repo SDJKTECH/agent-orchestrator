@@ -146,20 +146,24 @@ class AgentService:
         model: str | None = None,
         effort: str | None = None,
         max_budget_usd: float | None = None,
+        worktree_path: Path | None = None,
     ) -> StageResult:
         """Run one agent process for a task and record its run and usage.
 
         A successful stage leaves the task RUNNING; failures and cancellations
-        are written to the task as well.
+        are written to the task as well. The agent runs in worktree_path when
+        given, otherwise in the task's own worktree.
         """
         task_id = task.id
 
-        if not task.worktree_path:
-            raise AgentExecutionError(
-                f"Task {task_id} does not have an assigned worktree."
-            )
+        if worktree_path is None:
+            if not task.worktree_path:
+                raise AgentExecutionError(
+                    f"Task {task_id} does not have an assigned worktree."
+                )
+            worktree_path = Path(task.worktree_path)
 
-        worktree_path = Path(task.worktree_path).resolve()
+        worktree_path = worktree_path.resolve()
 
         if not worktree_path.is_dir():
             raise AgentExecutionError(

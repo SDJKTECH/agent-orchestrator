@@ -21,6 +21,7 @@ class TaskResponse(BaseModel):
     status: TaskStatus
     github_issue_number: int | None = None
     current_stage: str | None = None
+    pull_request_url: str | None = None
     branch_name: str | None
     worktree_path: str | None
     created_at: datetime

@@ -58,6 +58,7 @@ def test_migrate_task_columns_adds_current_stage(tmp_path):
 
     columns = {column["name"] for column in inspect(engine).get_columns("tasks")}
     assert "current_stage" in columns
+    assert "pull_request_url" in columns
 
     with engine.connect() as connection:
         row = connection.execute(text("SELECT title, current_stage FROM tasks")).one()

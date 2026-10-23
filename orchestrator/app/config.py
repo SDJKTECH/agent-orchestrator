@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     # Post progress/result comments on the GitHub issue (opt-in, writes to GitHub).
     comment_on_issues: bool = False
 
+    # Publishing (opt-in, writes to GitHub): push every agent branch, and open
+    # a pull request into base_branch when the reviewer approves.
+    publish_branches: bool = False
+    open_pull_request: bool = False
+    git_remote: str = "origin"
+    base_branch: str = "main"
+
     # Optional budget guardrail; None means no configured limit.
     max_task_cost_usd: float | None = Field(
         default=None,
