@@ -60,6 +60,23 @@ class UsageSummaryResponse(BaseModel):
     estimated_cost_run_count: int
 
 
+class MilestoneStats(BaseModel):
+    code: str
+    title: str
+    task_count: int
+    cost_usd: float
+
+
+class StatsResponse(BaseModel):
+    total_tasks: int
+    tasks_by_status: dict[str, int]
+    total_runs: int
+    input_tokens: int
+    output_tokens: int
+    total_cost_usd: float
+    milestones: list[MilestoneStats]
+
+
 class VerificationResultResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

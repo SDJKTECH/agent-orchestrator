@@ -11,6 +11,7 @@ from orchestrator.app.agents.execution_manager import ExecutionManager
 from orchestrator.app.api.control_routes import router as control_router
 from orchestrator.app.api.intake_routes import router as intake_router
 from orchestrator.app.api.project_routes import router as project_router
+from orchestrator.app.api.stats_routes import router as stats_router
 from orchestrator.app.api.task_routes import router as task_router
 from orchestrator.app.db.database import Base, get_db
 from orchestrator.app.db.models import Milestone, Project
@@ -28,7 +29,13 @@ def routes_client():
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     app = FastAPI()
-    for router in (project_router, intake_router, task_router, control_router):
+    for router in (
+        project_router,
+        intake_router,
+        task_router,
+        control_router,
+        stats_router,
+    ):
         app.include_router(router)
 
     manager = ExecutionManager(max_workers=1)
