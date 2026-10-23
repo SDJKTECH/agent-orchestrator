@@ -253,6 +253,41 @@ def test_dashboard_page_never_injects_html() -> None:
     assert "document.write" not in html
 
 
+def _dashboard_source() -> str:
+    from pathlib import Path
+
+    return Path(dashboard_routes.PAGE).read_text(encoding="utf-8")
+
+
+def _function_body(source: str, name: str) -> str:
+    start = source.index(f"function {name}(")
+    end = source.index("\n}\n", start)
+    return source[start:end]
+
+
+def test_task_card_facts_row_shows_time_after_cost() -> None:
+    card = _function_body(_dashboard_source(), "renderCard")
+    facts = card.index('el("div", { class: "facts" }')
+
+    time_label = card.index('"Time "', facts)
+    assert card.index('"Cost "', facts) < time_label < card.index("branches", facts)
+    assert 'class: "task-time"' in card[time_label:]
+    assert '"data-task-start": span.start' in card[time_label:]
+    assert '"data-task-end": span.end' in card[time_label:]
+
+
+def test_task_time_placeholder_and_ticking() -> None:
+    source = _dashboard_source()
+    span = _function_body(source, "taskSpan")
+    ticker = _function_body(source, "tickDurations")
+
+    assert 'return { start: "", end: "" };' in span
+    assert 'running || end === null ? "" : ' in span
+    assert 'document.querySelectorAll("strong[data-task-start]")' in ticker
+    assert 'fmtDuration((end - start) / 1000) : "–"' in ticker
+    assert "setInterval(tickDurations, 1000);" in source
+
+
 def test_control_routes_share_status_groups() -> None:
     from orchestrator.app.db.models import CANCELLABLE_STATUSES, PAUSABLE_STATUSES
 
