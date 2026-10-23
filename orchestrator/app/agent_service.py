@@ -11,6 +11,7 @@ from orchestrator.app.agent_runner import (
     ProcessRunner,
     SubprocessRunner,
     build_claude_command,
+    resolve_executable,
 )
 from orchestrator.app.config import get_settings
 from orchestrator.app.exceptions import AgentExecutionError
@@ -196,12 +197,20 @@ class AgentService:
             budget = self.settings.max_task_cost_usd
 
         command = build_claude_command(
-            claude_command=self.settings.claude_command,
+            claude_command=resolve_executable(self.settings.claude_command),
             prompt=prompt,
             model=model,
             effort=effort,
             max_budget_usd=budget,
             agent=agent_role,
+            permission_mode=getattr(self.settings, "claude_permission_mode", None),
+            allowed_tools=[
+                tool.strip()
+                for tool in (
+                    getattr(self.settings, "claude_allowed_tools", "") or ""
+                ).split(",")
+                if tool.strip()
+            ],
         )
 
         agent_run = AgentRun(

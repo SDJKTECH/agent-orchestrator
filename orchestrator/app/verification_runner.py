@@ -3,10 +3,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from orchestrator.app.agent_runner import (
+    SECRET_ENV_VARS,
     AgentExecutionError,
     ProcessRunner,
     SubprocessRunner,
 )
+from orchestrator.app.config import Settings
+
+
+def check_strip_env() -> set[str]:
+    """Env vars hidden from checks: secrets and the orchestrator's own settings.
+
+    The checked project must run in a clean environment, not the one the
+    orchestrator was configured with.
+    """
+    return set(SECRET_ENV_VARS) | {name.upper() for name in Settings.model_fields}
 
 
 @dataclass(frozen=True)
@@ -23,7 +34,7 @@ class VerificationRunner:
         timeout_seconds: int = 300,
         ruff_target: str = "orchestrator",
     ) -> None:
-        self.runner = runner or SubprocessRunner()
+        self.runner = runner or SubprocessRunner(strip_env=check_strip_env())
         self.timeout_seconds = timeout_seconds
         self.ruff_target = ruff_target
 

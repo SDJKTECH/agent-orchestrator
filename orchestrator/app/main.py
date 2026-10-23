@@ -10,7 +10,7 @@ from orchestrator.app.config import get_settings
 from orchestrator.app.control_routes import router as control_router
 from orchestrator.app.database import SessionLocal, create_tables, engine
 from orchestrator.app.execution_manager import ExecutionManager
-from orchestrator.app.github_reporter import GhIssueReporter
+from orchestrator.app.github_reporter import make_reporter
 from orchestrator.app.intake_poller import IntakePoller
 from orchestrator.app.intake_routes import router as intake_router
 from orchestrator.app.logging_config import setup_logging
@@ -41,11 +41,7 @@ async def lifespan(app: FastAPI):
         if current.repository_path is None:
             logger.warning("Issue polling is enabled but repository_path is not set.")
         else:
-            reporter = (
-                GhIssueReporter(current.repository_path, current.github_repo)
-                if current.comment_on_issues
-                else None
-            )
+            reporter = make_reporter(current) if current.comment_on_issues else None
             poller = IntakePoller(
                 settings=current,
                 session_factory=SessionLocal,

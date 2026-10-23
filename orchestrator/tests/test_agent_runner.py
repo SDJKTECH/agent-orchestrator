@@ -248,3 +248,108 @@ def test_build_claude_command_expands_multi_token_command() -> None:
 
     assert command[:3] == ["/opt/my python/python", "/opt/fake.py", "--print"]
     assert command[-1] == "Do the task"
+
+
+def test_resolve_executable_prefers_native_claude_over_npm_shim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from orchestrator.app.agent_runner import resolve_executable
+
+    shim = tmp_path / "claude.CMD"
+    shim.write_text("", encoding="utf-8")
+    native = tmp_path / "node_modules" / "@anthropic-ai" / "claude-code" / "bin"
+    native.mkdir(parents=True)
+    (native / "claude.exe").write_text("", encoding="utf-8")
+    monkeypatch.setattr("shutil.which", lambda name: str(shim))
+
+    assert resolve_executable("claude") == str(native / "claude.exe")
+
+
+def test_resolve_executable_keeps_shim_without_native_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from orchestrator.app.agent_runner import resolve_executable
+
+    shim = tmp_path / "claude.CMD"
+    shim.write_text("", encoding="utf-8")
+    monkeypatch.setattr("shutil.which", lambda name: str(shim))
+
+    assert resolve_executable("claude") == str(shim)
+
+
+def test_resolve_executable_leaves_unknown_and_complex_commands_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from orchestrator.app.agent_runner import resolve_executable
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    assert resolve_executable("claude") == "claude"
+    assert resolve_executable('"/opt/my python/python" "/opt/fake.py"') == (
+        '"/opt/my python/python" "/opt/fake.py"'
+    )
+
+
+def test_build_claude_command_adds_permissions_before_the_prompt() -> None:
+    command = build_claude_command(
+        claude_command="claude",
+        prompt="Do the task",
+        permission_mode="acceptEdits",
+        allowed_tools=["Bash(git status:*)", "Bash(python -m pytest:*)"],
+    )
+
+    assert command[command.index("--permission-mode") + 1] == "acceptEdits"
+    tools = command[command.index("--allowedTools") + 1]
+    assert tools == "Bash(git status:*),Bash(python -m pytest:*)"
+    # "--" must separate the variadic tool list from the prompt.
+    assert command[-2:] == ["--", "Do the task"]
+
+
+def test_build_claude_command_rejects_unknown_permission_mode() -> None:
+    with pytest.raises(ValueError, match="permission mode"):
+        build_claude_command(
+            claude_command="claude",
+            prompt="Do the task",
+            permission_mode="yolo",
+        )
+
+
+def test_subprocess_runner_hides_secrets_from_child_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-value")
+    monkeypatch.setenv("KEEP_ME", "visible")
+    script = (
+        "import os; print(os.environ.get('GITHUB_TOKEN', 'absent'),"
+        " os.environ.get('KEEP_ME', 'absent'))"
+    )
+
+    result = SubprocessRunner().run(
+        [sys.executable, "-c", script], cwd=tmp_path, timeout_seconds=30
+    )
+
+    assert result.stdout.split() == ["absent", "visible"]
+
+
+def test_verification_checks_run_without_orchestrator_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    from orchestrator.app.verification_runner import check_strip_env
+
+    monkeypatch.setenv("MAX_CONCURRENT_AGENTS", "1")
+    monkeypatch.setenv("REPOSITORY_PATH", "/somewhere")
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-value")
+    script = (
+        "import os; print(*(n for n in ('MAX_CONCURRENT_AGENTS',"
+        " 'REPOSITORY_PATH', 'GITHUB_TOKEN') if n in os.environ))"
+    )
+
+    result = SubprocessRunner(strip_env=check_strip_env()).run(
+        [sys.executable, "-c", script], cwd=tmp_path, timeout_seconds=30
+    )
+
+    assert result.stdout.strip() == ""

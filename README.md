@@ -39,8 +39,13 @@ branch into `main` with `Closes #<issue>`. It comments progress and a cost summa
 on the issue. It never merges anything. Tasks for different issues run in
 parallel (`MAX_CONCURRENT_AGENTS`), and you can pause/resume/cancel any of them.
 
-Prerequisites: `gh` installed and signed in (`gh auth login`), the `claude` CLI,
-and local `main` pushed to `origin` (agents branch from local `main`).
+Prerequisites: the `claude` CLI and local `main` pushed to `origin` (agents branch
+from local `main`). For GitHub access use either the `gh` CLI (`gh auth login`) or
+no CLI at all: `--backend rest` calls the GitHub API directly. On a public repo
+that needs no token to read issues; branches are pushed with your normal git
+credentials. Set `GITHUB_TOKEN` (fine-grained, Issues + Pull requests: write) to
+also open real PRs, comment on issues and create labels/issues from the script;
+without it you get a compare link instead of a PR.
 
 ```
 python demo/run_live.py --create-label

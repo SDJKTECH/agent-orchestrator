@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     # Repository and Claude Code execution settings
     repository_path: Path | None = None
     claude_command: str = "claude"
+    # Headless agents cannot answer permission prompts, so they must be told
+    # what they may do. acceptEdits allows file edits inside the worktree; the
+    # allowlist adds only test, lint and read-only git commands.
+    claude_permission_mode: str | None = "acceptEdits"
+    claude_allowed_tools: str = (
+        "Bash(python -m pytest:*),Bash(python -m ruff:*),Bash(git status:*),"
+        "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+    )
 
     # Agent execution limits
     max_concurrent_agents: int = Field(default=2, ge=1, le=20)
@@ -50,6 +58,10 @@ class Settings(BaseSettings):
     issue_source: Literal["gh", "file"] = "gh"
     issue_file_path: Path | None = None
     github_repo: str | None = None
+    # "gh" uses the GitHub CLI; "rest" calls the GitHub API directly (no CLI).
+    github_backend: Literal["gh", "rest"] = "gh"
+    # Needed by the rest backend only to write (comments, pull requests).
+    github_token: SecretStr | None = None
     # Only issues carrying this label are picked up (gh source only).
     issue_label: str | None = "agent-task"
 

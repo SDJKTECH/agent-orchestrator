@@ -2,6 +2,9 @@ import logging
 import subprocess
 from pathlib import Path
 
+from orchestrator.app.config import Settings
+from orchestrator.app.exceptions import OrchestratorError
+from orchestrator.app.github_api import GitHubApi, detect_github_repo
 from orchestrator.app.models import Task
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,40 @@ class GhIssueReporter:
             return False
 
         return True
+
+
+class RestIssueReporter:
+    """Post issue comments through the REST API. Needs a token to write."""
+
+    def __init__(self, api: GitHubApi) -> None:
+        self.api = api
+
+    def comment(self, issue_number: int, body: str) -> bool:
+        if not self.api.can_write:
+            logger.info("No GitHub token configured; skipping issue comment.")
+            return False
+
+        try:
+            self.api.request("POST", f"/issues/{issue_number}/comments", {"body": body})
+        except OrchestratorError as exc:
+            logger.warning("Could not comment on issue %s: %s", issue_number, exc)
+            return False
+
+        return True
+
+
+def make_reporter(settings: Settings) -> "GhIssueReporter | RestIssueReporter":
+    """Create the issue reporter for the configured GitHub backend."""
+    if settings.github_backend == "rest":
+        repo = settings.github_repo or detect_github_repo(settings.repository_path)
+        token = (
+            settings.github_token.get_secret_value() if settings.github_token else None
+        )
+
+        if repo is not None:
+            return RestIssueReporter(GitHubApi(repo, token))
+
+    return GhIssueReporter(settings.repository_path, settings.github_repo)
 
 
 def picked_up_message(task: Task) -> str:

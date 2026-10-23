@@ -1,6 +1,7 @@
 import json
 import logging
 import subprocess
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from orchestrator.app.config import Settings
 from orchestrator.app.exceptions import IssueSourceError, OrchestratorError
+from orchestrator.app.github_api import GitHubApi, detect_github_repo
 from orchestrator.app.models import Task
 from orchestrator.app.task_service import create_task
 
@@ -151,6 +153,29 @@ class GhCliIssueSource:
             raise IssueSourceError("gh returned invalid JSON.") from exc
 
 
+class RestIssueSource:
+    """Read open issues through the GitHub REST API (public repos need no token)."""
+
+    def __init__(self, api: GitHubApi, label: str | None = None, limit: int = 50):
+        self.api = api
+        self.label = label
+        self.limit = limit
+
+    def list_issues(self) -> list[Issue]:
+        path = f"/issues?state=open&per_page={self.limit}"
+
+        if self.label:
+            path += f"&labels={urllib.parse.quote(self.label)}"
+
+        items = self.api.request("GET", path)
+
+        if not isinstance(items, list):
+            raise IssueSourceError("GitHub returned an unexpected issues payload.")
+
+        # The issues endpoint also returns pull requests; skip them.
+        return _parse_issues([item for item in items if "pull_request" not in item])
+
+
 def build_issue_source(settings: Settings) -> IssueSource:
     """Create the issue source selected in settings."""
     if settings.issue_source == "file":
@@ -159,6 +184,19 @@ def build_issue_source(settings: Settings) -> IssueSource:
                 "ISSUE_FILE_PATH is required when ISSUE_SOURCE=file."
             )
         return FileIssueSource(settings.issue_file_path)
+
+    if settings.github_backend == "rest":
+        repo = settings.github_repo or detect_github_repo(settings.repository_path)
+
+        if repo is None:
+            raise IssueSourceError(
+                "Set GITHUB_REPO (owner/name); it could not be detected from origin."
+            )
+
+        token = (
+            settings.github_token.get_secret_value() if settings.github_token else None
+        )
+        return RestIssueSource(GitHubApi(repo, token), label=settings.issue_label)
 
     return GhCliIssueSource(
         repository_path=settings.repository_path,

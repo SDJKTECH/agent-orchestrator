@@ -10,8 +10,8 @@ from orchestrator.app.agent_service import AgentService
 from orchestrator.app.config import get_settings
 from orchestrator.app.database import SessionLocal, get_db
 from orchestrator.app.exceptions import RepositoryError
-from orchestrator.app.github_publisher import GhPullRequestPublisher
-from orchestrator.app.github_reporter import GhIssueReporter, outcome_message
+from orchestrator.app.github_publisher import make_publisher
+from orchestrator.app.github_reporter import make_reporter, outcome_message
 from orchestrator.app.models import Task, TaskStatus
 from orchestrator.app.pipeline_service import PipelineService
 from orchestrator.app.process_control import process_control
@@ -132,11 +132,7 @@ def _build_pipeline(session: Session) -> PipelineService:
 
     publisher = None
     if settings.publish_branches and settings.open_pull_request:
-        publisher = GhPullRequestPublisher(
-            repository_path=settings.repository_path,
-            github_repo=settings.github_repo,
-            base_branch=settings.base_branch,
-        )
+        publisher = make_publisher(settings)
 
     return PipelineService(
         db=session,
@@ -162,10 +158,7 @@ def _report_outcome(session: Session, task_id: int) -> None:
             return
 
         session.refresh(task)
-        GhIssueReporter(
-            repository_path=settings.repository_path,
-            github_repo=settings.github_repo,
-        ).comment(task.github_issue_number, outcome_message(task))
+        make_reporter(settings).comment(task.github_issue_number, outcome_message(task))
     except Exception:
         logger.exception("Could not report outcome for task %s", task_id)
 

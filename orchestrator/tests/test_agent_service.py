@@ -430,3 +430,16 @@ def test_run_task_marks_cancelled_when_task_was_cancelled(setup_agent_service):
     assert context.task.status == TaskStatus.CANCELLED
     assert result.finished_at is not None
     context.verification_runner.run_checks.assert_not_called()
+
+
+def test_run_task_passes_permissions_to_the_agent(setup_agent_service):
+    context = setup_agent_service
+    context.service.settings.claude_permission_mode = "acceptEdits"
+    context.service.settings.claude_allowed_tools = "Bash(git status:*), Edit"
+
+    context.service.run_task(1)
+
+    command = context.runner.run.call_args.args[0]
+    assert command[command.index("--permission-mode") + 1] == "acceptEdits"
+    assert command[command.index("--allowedTools") + 1] == "Bash(git status:*),Edit"
+    assert command[-2] == "--"

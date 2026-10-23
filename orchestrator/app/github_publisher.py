@@ -3,6 +3,9 @@ import subprocess
 from pathlib import Path
 from typing import Protocol
 
+from orchestrator.app.config import Settings
+from orchestrator.app.exceptions import OrchestratorError
+from orchestrator.app.github_api import GitHubApi, detect_github_repo
 from orchestrator.app.models import Task
 
 logger = logging.getLogger(__name__)
@@ -82,3 +85,61 @@ class GhPullRequestPublisher:
 
         lines = result.stdout.strip().splitlines()
         return lines[-1].strip() if lines else None
+
+
+class RestPullRequestPublisher:
+    """Open pull requests through the REST API.
+
+    Without a token it cannot write, so it returns the GitHub compare link
+    where the pull request can be opened by hand.
+    """
+
+    def __init__(self, api: GitHubApi, base_branch: str = "main") -> None:
+        self.api = api
+        self.base_branch = base_branch
+
+    def open_pull_request(self, task: Task, head: str) -> str | None:
+        if not self.api.can_write:
+            return (
+                f"https://github.com/{self.api.repo}/compare/"
+                f"{self.base_branch}...{head}?expand=1"
+            )
+
+        try:
+            created = self.api.request(
+                "POST",
+                "/pulls",
+                {
+                    "title": f"{task.title} (agent task {task.id})",
+                    "head": head,
+                    "base": self.base_branch,
+                    "body": pull_request_body(task),
+                },
+            )
+        except OrchestratorError as exc:
+            logger.warning(
+                "Could not open pull request: task_id=%s error=%s", task.id, exc
+            )
+            return None
+
+        return created.get("html_url") if isinstance(created, dict) else None
+
+
+def make_publisher(settings: Settings) -> PullRequestPublisher:
+    """Create the pull request publisher for the configured GitHub backend."""
+    if settings.github_backend == "rest":
+        repo = settings.github_repo or detect_github_repo(settings.repository_path)
+        token = (
+            settings.github_token.get_secret_value() if settings.github_token else None
+        )
+
+        if repo is not None:
+            return RestPullRequestPublisher(
+                GitHubApi(repo, token), settings.base_branch
+            )
+
+    return GhPullRequestPublisher(
+        repository_path=settings.repository_path,
+        github_repo=settings.github_repo,
+        base_branch=settings.base_branch,
+    )
