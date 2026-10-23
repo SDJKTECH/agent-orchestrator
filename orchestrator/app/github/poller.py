@@ -91,11 +91,13 @@ class IntakePoller:
                         task.github_issue_number, picked_up_message(task)
                     )
 
+            project_id = session.get(Milestone, milestone_id).project_id
             queued_ids = list(
                 session.scalars(
                     select(Task.id)
+                    .join(Milestone, Task.milestone_id == Milestone.id)
                     .where(
-                        Task.milestone_id == milestone_id,
+                        Milestone.project_id == project_id,
                         Task.status == TaskStatus.QUEUED,
                     )
                     .order_by(Task.id)

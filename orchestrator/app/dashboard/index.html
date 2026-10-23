@@ -100,6 +100,25 @@
   .tile .value { font-size: 26px; font-weight: 600; margin: 2px 0; }
   .tile .sub { color: var(--ink-2); font-size: 12px; }
 
+  .milestones {
+    background: var(--surface); border: 1px solid var(--ring); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 16px;
+  }
+  .milestones h2 { font-size: 14px; margin: 0 0 6px; color: var(--ink-2); }
+  .ms-row {
+    display: grid; grid-template-columns: minmax(180px, 2fr) 1fr 1fr 1fr; gap: 4px 12px;
+    align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px;
+  }
+  .ms-row .code { font-weight: 600; }
+  .ms-row .num { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .ms-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .ms-bar > span { display: block; height: 100%; background: var(--good); }
+  .chip {
+    font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--line-strong); color: var(--ink-2); white-space: nowrap;
+  }
+  @media (max-width: 720px) { .ms-row { grid-template-columns: 1fr 1fr; } }
+
   .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
   .filters .count { color: var(--ink-2); font-size: 13px; margin-left: auto; }
 
@@ -182,6 +201,8 @@
   </header>
 
   <section class="tiles" aria-label="Summary" id="tiles"></section>
+
+  <section class="milestones" id="milestones" aria-label="Milestones" hidden></section>
 
   <div class="filters">
     <label for="filter">Show</label>
@@ -302,6 +323,23 @@ function renderTiles(summary) {
       `${fmtInt(summary.usage.output_tokens)} out · cache ${fmtInt(summary.usage.cache_read_input_tokens)} read`),
     tile("Cost", fmtCost(summary.usage.cost_usd), "reported by Claude, all listed tasks"),
   );
+}
+
+function renderMilestones(milestones) {
+  const used = milestones.filter((m) => m.task_count > 0);
+  const box = document.getElementById("milestones");
+  box.hidden = used.length === 0;
+  box.replaceChildren(
+    el("h2", { text: "Milestones" }),
+    used.map((m) => {
+      const percent = Math.round((100 * m.completed_count) / m.task_count);
+      return el("div", { class: "ms-row" },
+        el("div", {}, el("span", { class: "code", text: m.code }), ` ${m.title.replace(m.code, "").replace(/^[\s–-]+/, "")}`),
+        el("div", { class: "ms-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100",
+          "aria-valuenow": String(percent), "aria-label": `${m.code} progress` }, el("span", { style: `width:${percent}%` })),
+        el("div", { class: "num", text: `${m.completed_count} of ${m.task_count} done` + (m.failed_count ? ` · ${m.failed_count} failed` : "") }),
+        el("div", { class: "num", text: `${fmtCost(m.usage.cost_usd)} · ${fmtInt(m.usage.input_tokens + m.usage.output_tokens)} tokens` }));
+    }));
 }
 
 function stepper(task) {
@@ -427,6 +465,7 @@ function renderCard(task) {
     el("div", { class: "card-head" },
       el("div", { class: "title" },
         el("span", { class: "id", text: `#${task.id} ` }), task.title),
+      task.milestone ? el("span", { class: "chip", title: "GitHub milestone", text: task.milestone }) : null,
       task.github_issue_number
         ? el("span", { class: "meta" }, task.issue_url ? link(task.issue_url, `issue #${task.github_issue_number}`) : `issue #${task.github_issue_number}`)
         : null,
@@ -452,6 +491,7 @@ function render() {
   const data = state.data;
   if (!data) return;
   renderTiles(data.summary);
+  renderMilestones(data.milestones);
   document.getElementById("repo").replaceChildren(
     data.repo ? link(`https://github.com/${data.repo}`, data.repo) : "");
 
@@ -542,7 +582,8 @@ document.getElementById("sync").addEventListener("click", async (event) => {
   button.disabled = true;
   try {
     let imported = 0, skipped = 0;
-    for (const milestone of state.data.milestones) {
+    // Issues are routed to their own milestone, so syncing through one is enough.
+    for (const milestone of state.data.milestones.slice(0, 1)) {
       const response = await fetch(`/milestones/${milestone.id}/sync`, { method: "POST" });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);

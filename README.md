@@ -55,6 +55,10 @@ every 2 seconds and shows, for every task:
   import new GitHub issues immediately.
 - **Cost and tokens:** per agent run, per task and in total (input, output, cache, USD),
   and how many agents are running out of the allowed maximum.
+- **Milestones:** each issue's GitHub milestone (for example "M6 - Token and Cost
+  Tracking") becomes a milestone in the orchestrator, created on first use. A panel
+  shows progress, failures, tokens and cost per milestone, and each task card shows a
+  milestone chip. Issues without a milestone go to a default "GitHub issues" group.
 - **Verification:** each check (unit tests, ruff check, ruff format) with its output.
 - **GitHub links:** the issue, each agent's branch and the pull request.
 

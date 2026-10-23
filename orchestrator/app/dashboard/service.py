@@ -167,6 +167,7 @@ def _task_view(task: Task, repo: str | None) -> DashboardTask:
         github_issue_number=task.github_issue_number,
         issue_url=issue_url,
         status=task.status,
+        milestone=task.milestone.code if task.milestone else None,
         current_stage=task.current_stage,
         pull_request_url=task.pull_request_url,
         created_at=task.created_at,
@@ -197,6 +198,7 @@ def build_overview(
         session.scalars(
             select(Task)
             .options(
+                selectinload(Task.milestone),
                 selectinload(Task.agent_runs),
                 selectinload(Task.verification_results),
             )
@@ -213,14 +215,33 @@ def build_overview(
     all_runs = [run for task in tasks for run in task.agent_runs]
     active_agents = sum(run.status in ACTIVE_RUN_STATUSES for run in all_runs)
 
-    milestones = [
-        DashboardMilestone(id=m.id, project=m.project.name, title=m.title)
-        for m in session.scalars(
-            select(Milestone)
-            .options(selectinload(Milestone.project))
-            .order_by(Milestone.id)
+    milestones = []
+    for milestone in session.scalars(
+        select(Milestone)
+        .options(
+            selectinload(Milestone.project),
+            selectinload(Milestone.tasks).selectinload(Task.agent_runs),
         )
-    ]
+        .order_by(Milestone.id)
+    ):
+        milestone_tasks = milestone.tasks
+        milestones.append(
+            DashboardMilestone(
+                id=milestone.id,
+                project=milestone.project.name,
+                code=milestone.code,
+                title=milestone.title,
+                task_count=len(milestone_tasks),
+                completed_count=sum(
+                    task.status == TaskStatus.COMPLETED for task in milestone_tasks
+                ),
+                failed_count=sum(
+                    task.status in (TaskStatus.FAILED, TaskStatus.CANCELLED)
+                    for task in milestone_tasks
+                ),
+                usage=_usage([run for t in milestone_tasks for run in t.agent_runs]),
+            )
+        )
 
     return DashboardOverview(
         generated_at=datetime.now(UTC),

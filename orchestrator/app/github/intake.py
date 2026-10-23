@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from orchestrator.app.core.config import Settings
 from orchestrator.app.core.exceptions import IssueSourceError, OrchestratorError
-from orchestrator.app.db.models import Task
+from orchestrator.app.db.models import Milestone, Task
 from orchestrator.app.github.client import GitHubApi, detect_github_repo
 from orchestrator.app.services.task_service import create_task
 
@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 MAX_TITLE_LENGTH = 250
 MAX_DESCRIPTION_LENGTH = 10000
+MAX_MILESTONE_TITLE_LENGTH = 200
+MAX_MILESTONE_CODE_LENGTH = 20
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,8 @@ class Issue:
     title: str
     body: str = ""
     labels: list[str] = field(default_factory=list)
+    milestone: str | None = None
+    milestone_number: int | None = None
 
 
 class IssueSource(Protocol):
@@ -61,12 +65,28 @@ def _parse_issues(items: object) -> list[Issue]:
             for label in item.get("labels") or []
             if not isinstance(label, dict) or "name" in label
         ]
+        milestone = item.get("milestone")
+        milestone_title = milestone_number = None
+        if isinstance(milestone, dict):
+            milestone_title = milestone.get("title")
+            milestone_number = milestone.get("number")
+        elif isinstance(milestone, str):
+            milestone_title = milestone
+
         issues.append(
             Issue(
                 number=number,
                 title=title.strip(),
                 body=item.get("body") or "",
                 labels=labels,
+                milestone=(
+                    milestone_title.strip()
+                    if isinstance(milestone_title, str) and milestone_title.strip()
+                    else None
+                ),
+                milestone_number=(
+                    milestone_number if isinstance(milestone_number, int) else None
+                ),
             )
         )
 
@@ -117,7 +137,7 @@ class GhCliIssueSource:
             "--limit",
             str(self.limit),
             "--json",
-            "number,title,body,labels",
+            "number,title,body,labels,milestone",
         ]
 
         if self.github_repo:
@@ -212,19 +232,58 @@ class SyncResult:
     failed: dict[int, str] = field(default_factory=dict)
 
 
+def milestone_for_issue(
+    session: Session, project_id: int, issue: Issue, default_id: int
+) -> int:
+    """Return the internal milestone matching the issue's GitHub milestone.
+
+    The milestone is created on first use. Issues without one use `default_id`.
+    """
+    if not issue.milestone:
+        return default_id
+
+    title = issue.milestone[:MAX_MILESTONE_TITLE_LENGTH]
+    milestone = session.scalar(
+        select(Milestone).where(
+            Milestone.project_id == project_id, Milestone.title == title
+        )
+    )
+
+    if milestone is None:
+        # "M2 - Git and Worktree Management" -> code "M2".
+        milestone = Milestone(
+            project_id=project_id,
+            code=title.split()[0][:MAX_MILESTONE_CODE_LENGTH],
+            title=title,
+            github_milestone_number=issue.milestone_number,
+        )
+        session.add(milestone)
+        session.flush()
+
+    return milestone.id
+
+
 def sync_issues(
     session: Session,
     milestone_id: int,
     source: IssueSource,
     worktrees_root: Path,
 ) -> SyncResult:
-    """Create a queued task (with worktree) for each issue not yet imported."""
+    """Create a queued task (with worktree) for each issue not yet imported.
+
+    Issues land in the internal milestone that mirrors their GitHub milestone;
+    issues without one go to `milestone_id`. An issue is imported once per project.
+    """
     issues = source.list_issues()
+    default = session.get(Milestone, milestone_id)
+    project_id = default.project_id if default else None
 
     existing = set(
         session.scalars(
-            select(Task.github_issue_number).where(
-                Task.milestone_id == milestone_id,
+            select(Task.github_issue_number)
+            .join(Milestone, Task.milestone_id == Milestone.id)
+            .where(
+                Milestone.project_id == project_id,
                 Task.github_issue_number.is_not(None),
             )
         )
@@ -240,7 +299,11 @@ def sync_issues(
         try:
             task = create_task(
                 session=session,
-                milestone_id=milestone_id,
+                milestone_id=(
+                    milestone_for_issue(session, project_id, issue, milestone_id)
+                    if project_id is not None
+                    else milestone_id
+                ),
                 title=issue.title[:MAX_TITLE_LENGTH],
                 description=issue.body[:MAX_DESCRIPTION_LENGTH],
                 worktrees_root=worktrees_root,

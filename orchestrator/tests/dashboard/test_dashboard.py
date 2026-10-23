@@ -265,3 +265,21 @@ def test_control_routes_share_status_groups() -> None:
     assert control_routes.PAUSABLE_STATUSES is PAUSABLE_STATUSES
     assert control_routes.CANCELLABLE_STATUSES is CANCELLABLE_STATUSES
     assert task_routes is not None
+
+
+def test_overview_reports_progress_and_cost_per_milestone(
+    routes_client, seeded
+) -> None:
+    seeded(TaskStatus.COMPLETED, runs=[("builder", "COMPLETED", 5)], title="a")
+    seeded(TaskStatus.FAILED, runs=[("builder", "COMPLETED", 5)], title="b")
+    seeded(TaskStatus.QUEUED, title="c")
+
+    result = overview(routes_client)
+    milestone = result.milestones[0]
+
+    assert result.tasks[0].milestone == "GH"
+    assert milestone.code == "GH"
+    assert (milestone.task_count, milestone.completed_count) == (3, 1)
+    assert milestone.failed_count == 1
+    assert milestone.usage.input_tokens == 10
+    assert milestone.usage.cost_usd == pytest.approx(1.0)

@@ -47,6 +47,7 @@ class DashboardTask(BaseModel):
     github_issue_number: int | None
     issue_url: str | None
     status: TaskStatus
+    milestone: str | None
     current_stage: str | None
     pull_request_url: str | None
     created_at: datetime
@@ -61,7 +62,12 @@ class DashboardTask(BaseModel):
 class DashboardMilestone(BaseModel):
     id: int
     project: str
+    code: str
     title: str
+    task_count: int
+    completed_count: int
+    failed_count: int
+    usage: UsageTotals
 
 
 class DashboardSummary(BaseModel):

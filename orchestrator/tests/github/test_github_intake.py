@@ -185,3 +185,63 @@ def test_sync_issues_reports_failures_and_continues(intake_environment) -> None:
 
     assert list(result.failed) == [1]
     assert [task.github_issue_number for task in result.imported] == [2]
+
+
+def test_file_source_reads_github_milestones(tmp_path) -> None:
+    path = tmp_path / "issues.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "number": 1,
+                    "title": "a",
+                    "milestone": {"title": "M6 - Cost", "number": 8},
+                },
+                {"number": 2, "title": "b", "milestone": None},
+                {"number": 3, "title": "c", "milestone": "M1 - Base"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    issues = FileIssueSource(path).list_issues()
+
+    assert [(i.milestone, i.milestone_number) for i in issues] == [
+        ("M6 - Cost", 8),
+        (None, None),
+        ("M1 - Base", None),
+    ]
+
+
+def test_sync_issues_routes_issues_to_their_github_milestone(
+    intake_environment,
+) -> None:
+    session_factory, default_id, worktrees_root = intake_environment
+    source = StaticIssueSource(
+        [
+            Issue(
+                number=1, title="a", milestone="M6 - Token and Cost", milestone_number=8
+            ),
+            Issue(
+                number=2, title="b", milestone="M6 - Token and Cost", milestone_number=8
+            ),
+            Issue(number=3, title="c"),
+        ]
+    )
+
+    with session_factory() as session:
+        sync_issues(session, default_id, source, worktrees_root)
+        again = sync_issues(session, default_id, source, worktrees_root)
+
+        by_issue = {
+            task.github_issue_number: task.milestone
+            for task in session.scalars(select(Task))
+        }
+        assert by_issue[1] is by_issue[2]
+        assert by_issue[1].code == "M6"
+        assert by_issue[1].title == "M6 - Token and Cost"
+        assert by_issue[1].github_milestone_number == 8
+        assert by_issue[3].id == default_id
+        assert again.imported == []
+        assert sorted(again.skipped) == [1, 2, 3]
+        assert len(session.scalars(select(Milestone)).all()) == 2
