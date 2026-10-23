@@ -1,0 +1,26 @@
+[
+  {
+    "number": 101,
+    "title": "Add temperature conversion helper",
+    "body": "Add a helper that converts Celsius to Fahrenheit.",
+    "labels": [{"name": "enhancement"}]
+  },
+  {
+    "number": 102,
+    "title": "Add slugify utility",
+    "body": "Add a utility that turns titles into URL slugs.",
+    "labels": [{"name": "enhancement"}]
+  },
+  {
+    "number": 103,
+    "title": "Add word counter",
+    "body": "Add a function that counts words in a string.",
+    "labels": [{"name": "enhancement"}]
+  },
+  {
+    "number": 104,
+    "title": "Add currency formatter",
+    "body": "Format amounts as currency strings.\n\nDEMO:REJECT - the stub reviewer rejects this one to show the review gate.",
+    "labels": [{"name": "enhancement"}]
+  }
+]
