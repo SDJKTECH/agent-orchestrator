@@ -15,6 +15,8 @@ from orchestrator.app.exceptions import AgentExecutionError
 from orchestrator.app.model_router import ModelRouter
 from orchestrator.app.models import AgentRun, Task, TaskStatus
 from orchestrator.app.usage_tracker import parse_usage
+from orchestrator.app.verification_runner import VerificationRunner
+from orchestrator.app.verification_service import record_verification_result
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +33,15 @@ class AgentService:
         self,
         db: Session,
         runner: ProcessRunner | None = None,
+        verification_runner: VerificationRunner | None = None,
     ) -> None:
         self.db = db
         self.runner = runner or SubprocessRunner()
         self.settings = get_settings()
         self.model_router = ModelRouter(self.settings)
+        self.verification_runner = verification_runner or VerificationRunner(
+            timeout_seconds=self.settings.verification_timeout_seconds,
+        )
 
     def run_task(
         self,
@@ -167,15 +173,39 @@ class AgentService:
                 agent_run.session_id = usage.session_id
 
             agent_run.process_id = result.process_id
-            agent_run.finished_at = _utc_now()
 
             if result.return_code == 0:
-                agent_run.status = "COMPLETED"
-                task.status = TaskStatus.COMPLETED
+                task.status = TaskStatus.VERIFYING
+                self.db.commit()
+
+                verification_results = self.verification_runner.run_checks(
+                    worktree_path
+                )
+                verification_passed = bool(verification_results)
+
+                for verification_result in verification_results:
+                    record_verification_result(
+                        session=self.db,
+                        task_id=task.id,
+                        check_name=verification_result.check_name,
+                        passed=verification_result.passed,
+                        details=verification_result.details,
+                    )
+
+                    if not verification_result.passed:
+                        verification_passed = False
+
+                if verification_passed:
+                    agent_run.status = "COMPLETED"
+                    task.status = TaskStatus.COMPLETED
+                else:
+                    agent_run.status = "FAILED"
+                    task.status = TaskStatus.FAILED
             else:
                 agent_run.status = "FAILED"
                 task.status = TaskStatus.FAILED
 
+            agent_run.finished_at = _utc_now()
             self.db.commit()
             self.db.refresh(agent_run)
             logger.info(

@@ -46,6 +46,7 @@ def setup_agent_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         claude_command="claude",
         max_task_cost_usd=1.0,
         agent_timeout_seconds=60,
+        verification_timeout_seconds=300,
         default_model="sonnet",
         default_effort="medium",
     )
@@ -54,12 +55,36 @@ def setup_agent_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         lambda: settings,
     )
 
-    service = AgentService(db=db, runner=runner)
+    verification_runner = MagicMock()
+    verification_runner.run_checks.return_value = [
+        SimpleNamespace(
+            check_name="unit_tests",
+            passed=True,
+            details="All tests passed",
+        ),
+        SimpleNamespace(
+            check_name="ruff_check",
+            passed=True,
+            details="All checks passed",
+        ),
+        SimpleNamespace(
+            check_name="ruff_format",
+            passed=True,
+            details="Formatting is correct",
+        ),
+    ]
+
+    service = AgentService(
+        db=db,
+        runner=runner,
+        verification_runner=verification_runner,
+    )
 
     return SimpleNamespace(
         service=service,
         db=db,
         runner=runner,
+        verification_runner=verification_runner,
         task=task,
         worktree=worktree,
     )
@@ -75,6 +100,7 @@ def test_run_task_completes_successfully(setup_agent_service):
     assert result.status == "COMPLETED"
     assert result.finished_at is not None
     context.runner.run.assert_called_once()
+    context.verification_runner.run_checks.assert_called_once_with(context.worktree)
 
 
 def test_run_task_logs_execution_lifecycle(setup_agent_service, caplog):
@@ -110,6 +136,7 @@ def test_run_task_marks_task_failed_on_nonzero_exit(setup_agent_service):
     assert context.task.status == TaskStatus.FAILED
     assert result.status == "FAILED"
     assert result.finished_at is not None
+    context.verification_runner.run_checks.assert_not_called()
 
 
 def test_run_task_rejects_missing_task(setup_agent_service):
@@ -333,3 +360,46 @@ def test_run_task_persists_usage_when_execution_fails(setup_agent_service):
     assert result.output_tokens == 3
     assert result.reported_cost_usd == pytest.approx(0.01)
     assert result.session_id == "session-failed"
+
+
+def test_run_task_marks_task_failed_when_verification_fails(
+    setup_agent_service,
+):
+    context = setup_agent_service
+    context.verification_runner.run_checks.return_value = [
+        SimpleNamespace(
+            check_name="unit_tests",
+            passed=True,
+            details="All tests passed",
+        ),
+        SimpleNamespace(
+            check_name="ruff_check",
+            passed=False,
+            details="Ruff found errors",
+        ),
+        SimpleNamespace(
+            check_name="ruff_format",
+            passed=True,
+            details="Formatting is correct",
+        ),
+    ]
+
+    result = context.service.run_task(1)
+
+    assert context.task.status == TaskStatus.FAILED
+    assert result.status == "FAILED"
+    context.verification_runner.run_checks.assert_called_once_with(context.worktree)
+    assert context.db.add.call_count == 4
+
+
+def test_run_task_marks_task_failed_when_no_verification_results(
+    setup_agent_service,
+):
+    context = setup_agent_service
+    context.verification_runner.run_checks.return_value = []
+
+    result = context.service.run_task(1)
+
+    assert context.task.status == TaskStatus.FAILED
+    assert result.status == "FAILED"
+    context.verification_runner.run_checks.assert_called_once_with(context.worktree)

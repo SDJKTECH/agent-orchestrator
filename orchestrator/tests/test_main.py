@@ -1,5 +1,6 @@
 import subprocess
 from threading import Event
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -242,11 +243,33 @@ def test_run_task_endpoint_success(api_environment, monkeypatch) -> None:
         stderr="",
         process_id=None,
     )
+    fake_verification_runner = MagicMock()
+    fake_verification_runner.run_checks.return_value = [
+        SimpleNamespace(
+            check_name="unit_tests",
+            passed=True,
+            details="All tests passed",
+        ),
+        SimpleNamespace(
+            check_name="ruff_check",
+            passed=True,
+            details="All checks passed",
+        ),
+        SimpleNamespace(
+            check_name="ruff_format",
+            passed=True,
+            details="Formatting is correct",
+        ),
+    ]
 
     monkeypatch.setattr(
         task_routes,
         "AgentService",
-        lambda db: AgentService(db=db, runner=fake_runner),
+        lambda db: AgentService(
+            db=db,
+            runner=fake_runner,
+            verification_runner=fake_verification_runner,
+        ),
     )
 
     task_completed = Event()

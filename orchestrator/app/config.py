@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     # Agent execution limits
     max_concurrent_agents: int = Field(default=2, ge=1, le=20)
     agent_timeout_seconds: int = Field(default=1800, ge=1)
+    verification_timeout_seconds: int = Field(default=300, ge=1)
     # Model and effort routing defaults
     default_model: str = "sonnet"
     default_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
