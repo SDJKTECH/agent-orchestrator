@@ -10,6 +10,7 @@ from orchestrator.app.api import task_routes
 from orchestrator.app.api.control_routes import router as control_router
 from orchestrator.app.api.intake_routes import router as intake_router
 from orchestrator.app.api.project_routes import router as project_router
+from orchestrator.app.api.stats_routes import router as stats_router
 from orchestrator.app.api.task_routes import router as task_router
 from orchestrator.app.api.usage_routes import router as usage_router
 from orchestrator.app.core.config import get_settings
@@ -78,6 +79,7 @@ app.include_router(intake_router)
 app.include_router(task_router)
 app.include_router(control_router)
 app.include_router(usage_router)
+app.include_router(stats_router)
 
 
 @app.middleware("http")
