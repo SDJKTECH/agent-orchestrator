@@ -15,6 +15,7 @@ from orchestrator.app.api.project_routes import router as project_router
 from orchestrator.app.api.stats_routes import router as stats_router
 from orchestrator.app.api.task_routes import router as task_router
 from orchestrator.app.api.usage_routes import router as usage_router
+from orchestrator.app.api.verification_routes import router as verification_router
 from orchestrator.app.core.config import get_settings
 from orchestrator.app.core.logging_config import setup_logging
 from orchestrator.app.dashboard.routes import router as dashboard_router
@@ -82,6 +83,7 @@ app.include_router(task_router)
 app.include_router(control_router)
 app.include_router(usage_router)
 app.include_router(stats_router)
+app.include_router(verification_router)
 
 
 @app.middleware("http")
