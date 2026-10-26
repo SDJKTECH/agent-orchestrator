@@ -1,7 +1,7 @@
 ---
 name: tester
 description: Writes and updates automated tests for changes made by the builder agent, then runs the test suite. Never modifies application code.
-model: haiku
+model: sonnet
 effort: medium
 ---
 

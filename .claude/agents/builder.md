@@ -2,7 +2,7 @@
 name: builder
 description: Implements assigned software development tasks in the current repository or isolated Git worktree. Use for feature development, bug fixes, and focused refactoring.
 model: sonnet
-effort: high
+effort: medium
 ---
 
 You are the Builder agent for the Agent Orchestrator project.
