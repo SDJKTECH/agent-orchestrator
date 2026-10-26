@@ -423,3 +423,82 @@ def test_module_entry_point_unknown_format_exits_nonzero_without_traceback(
     assert result.returncode == 1
     assert "unknown format 'yaml'" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+# --- additional edge cases ---------------------------------------------------
+
+
+def test_cli_output_into_missing_directory_reports_error_without_traceback(
+    tmp_path, capsys
+):
+    path = _write_csv(tmp_path)
+    out_path = tmp_path / "no_such_dir" / "result.json"
+
+    assert main([str(path), "--format", "json", "--output", str(out_path)]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("error: cannot write")
+    assert "Traceback" not in captured.err
+    assert not out_path.exists()
+
+
+@pytest.mark.parametrize("fmt", ["text", "json", "markdown"])
+def test_cli_unreadable_input_with_output_does_not_create_output(tmp_path, capsys, fmt):
+    path = _write_csv(tmp_path, "")
+    out_path = tmp_path / "result.out"
+
+    assert main([str(path), "--format", fmt, "--output", str(out_path)]) == 1
+
+    assert not out_path.exists()
+    assert "has no header row" in capsys.readouterr().err
+
+
+def test_cli_output_replaces_previous_file_when_format_changes(tmp_path):
+    path = _write_csv(tmp_path)
+    out_path = tmp_path / "result"
+
+    assert main([str(path), "--format", "json", "--output", str(out_path)]) == 0
+    assert main([str(path), "--format", "markdown", "--output", str(out_path)]) == 0
+
+    content = out_path.read_text(encoding="utf-8")
+    assert content.startswith(MARKDOWN_HEADER)
+    assert "{" not in content
+
+
+def test_non_ascii_column_names_survive_json_and_markdown(tmp_path, capsys):
+    path = _write_csv(tmp_path, "nom,città\nérika,Zürich\n", name="unicode.csv")
+    summary = summarise(path)
+
+    assert json.loads(format_json(summary))["columns"][1]["name"] == "città"
+    assert "| città | text |" in format_markdown(summary)
+
+    out_path = tmp_path / "unicode.md"
+    assert main([str(path), "--format", "markdown", "--output", str(out_path)]) == 0
+    assert "| città | text |" in out_path.read_text(encoding="utf-8")
+
+
+def test_module_entry_point_writes_markdown_to_output_file(tmp_path):
+    path = _write_csv(tmp_path)
+    out_path = tmp_path / "summary.md"
+
+    result = _run_module(str(path), "--format", "markdown", "--output", str(out_path))
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert out_path.read_text(encoding="utf-8").splitlines()[0] == MARKDOWN_HEADER
+
+
+def test_module_entry_point_unreadable_output_exits_nonzero_without_traceback(
+    tmp_path,
+):
+    path = _write_csv(tmp_path)
+    bad_out = tmp_path / "missing_dir" / "out.json"
+
+    result = _run_module(str(path), "--format", "json", "--output", str(bad_out))
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "error: cannot write" in result.stderr
+    assert "Traceback" not in result.stderr
