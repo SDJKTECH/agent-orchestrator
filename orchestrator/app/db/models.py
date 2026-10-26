@@ -95,6 +95,10 @@ class Task(Base):
     worktree_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     current_stage: Mapped[str | None] = mapped_column(String(50), nullable=True)
     pull_request_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # GitHub Projects card of the issue, and the board column it was last moved to.
+    project_item_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    board_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    board_column: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )

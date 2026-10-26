@@ -50,6 +50,8 @@ class DashboardTask(BaseModel):
     issue_url: str | None
     status: TaskStatus
     milestone: str | None
+    board_column: str | None = None
+    project: str | None = None
     current_stage: str | None
     pull_request_url: str | None
     created_at: datetime

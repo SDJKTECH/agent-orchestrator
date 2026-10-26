@@ -11,13 +11,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from orchestrator.app.agents.execution_manager import ExecutionManager
 from orchestrator.app.core.config import Settings
 from orchestrator.app.db.models import Milestone, Project, Task, TaskStatus
-from orchestrator.app.github.intake import IssueSource, build_issue_source, sync_issues
+from orchestrator.app.github.board_reporter import BoardMover
+from orchestrator.app.github.intake import (
+    MILESTONE_CODE,
+    MILESTONE_TITLE,
+    IssueSource,
+    build_issue_source,
+    sync_issues,
+)
+from orchestrator.app.github.projects import QUEUED
 from orchestrator.app.github.reporter import GhIssueReporter, picked_up_message
 
 logger = logging.getLogger(__name__)
-
-MILESTONE_CODE = "GH"
-MILESTONE_TITLE = "GitHub issues"
 
 
 class IntakePoller:
@@ -31,6 +36,7 @@ class IntakePoller:
         run_pipeline: Callable[[int], None],
         source: IssueSource | None = None,
         reporter: GhIssueReporter | None = None,
+        board: BoardMover | None = None,
     ) -> None:
         if settings.repository_path is None:
             raise ValueError("repository_path is required for issue polling.")
@@ -42,6 +48,7 @@ class IntakePoller:
         self.run_pipeline = run_pipeline
         self.source = source
         self.reporter = reporter
+        self.board = board
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -92,14 +99,20 @@ class IntakePoller:
                     self.reporter.comment(
                         task.github_issue_number, picked_up_message(task)
                     )
+                if self.board:
+                    self.board.move(task, QUEUED)
 
-            project_id = session.get(Milestone, milestone_id).project_id
+            if self.board:
+                self.board.sync_merged(session)
+
+            # Boards create their own projects, all working in this clone.
             queued_ids = list(
                 session.scalars(
                     select(Task.id)
                     .join(Milestone, Task.milestone_id == Milestone.id)
+                    .join(Project, Milestone.project_id == Project.id)
                     .where(
-                        Milestone.project_id == project_id,
+                        Project.local_path == str(self.repository_path),
                         Task.status == TaskStatus.QUEUED,
                     )
                     .order_by(Task.id)

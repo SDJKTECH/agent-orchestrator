@@ -15,6 +15,7 @@ from orchestrator.app.core.config import get_settings
 from orchestrator.app.core.exceptions import RepositoryError
 from orchestrator.app.db.database import SessionLocal, get_db
 from orchestrator.app.db.models import Task, TaskStatus
+from orchestrator.app.github.board_reporter import make_board
 from orchestrator.app.github.publisher import make_publisher
 from orchestrator.app.github.reporter import make_reporter, outcome_message
 from orchestrator.app.pipeline.pipeline_service import PipelineService
@@ -144,6 +145,7 @@ def _build_pipeline(session: Session) -> PipelineService:
         ),
         publisher=publisher,
         max_fix_attempts=settings.max_fix_attempts,
+        board=make_board(settings),
     )
 
 

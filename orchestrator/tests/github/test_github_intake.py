@@ -245,3 +245,31 @@ def test_sync_issues_routes_issues_to_their_github_milestone(
         assert again.imported == []
         assert sorted(again.skipped) == [1, 2, 3]
         assert len(session.scalars(select(Milestone)).all()) == 2
+
+
+def test_sync_issues_gives_each_board_its_own_project(intake_environment) -> None:
+    session_factory, default_id, worktrees_root = intake_environment
+    source = StaticIssueSource(
+        [
+            Issue(number=1, title="a", board_number=4, board_title="CSV Summariser"),
+            Issue(number=2, title="b", board_number=4, board_title="CSV Summariser"),
+            Issue(number=3, title="c", board_number=5, board_title="Task Dashboard"),
+            Issue(number=4, title="d"),
+        ]
+    )
+
+    with session_factory() as session:
+        sync_issues(session, default_id, source, worktrees_root)
+        again = sync_issues(session, default_id, source, worktrees_root)
+
+        tasks = {t.github_issue_number: t for t in session.scalars(select(Task))}
+        project = {n: t.milestone.project for n, t in tasks.items()}
+        assert project[1] is project[2]
+        assert project[1].name == "CSV Summariser"
+        assert project[3].name == "Task Dashboard"
+        assert project[4].name == "intake"
+        # Every board works in the same repository clone.
+        assert project[1].local_path == project[4].local_path
+        assert [tasks[n].board_number for n in (1, 3, 4)] == [4, 5, None]
+        assert again.imported == []
+        assert sorted(again.skipped) == [1, 2, 3, 4]

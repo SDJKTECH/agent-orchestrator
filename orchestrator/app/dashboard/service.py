@@ -182,6 +182,8 @@ def _task_view(task: Task, repo: str | None) -> DashboardTask:
         issue_url=issue_url,
         status=task.status,
         milestone=task.milestone.code if task.milestone else None,
+        board_column=task.board_column,
+        project=task.milestone.project.name if task.milestone else None,
         current_stage=task.current_stage,
         pull_request_url=task.pull_request_url,
         created_at=task.created_at,
@@ -212,7 +214,7 @@ def build_overview(
         session.scalars(
             select(Task)
             .options(
-                selectinload(Task.milestone),
+                selectinload(Task.milestone).selectinload(Milestone.project),
                 selectinload(Task.agent_runs),
                 selectinload(Task.verification_results),
             )

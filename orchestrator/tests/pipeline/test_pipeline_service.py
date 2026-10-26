@@ -504,3 +504,67 @@ def test_fix_attempts_reuse_the_branch_and_open_one_pull_request(pipeline) -> No
     assert {call.args[0].id for call in isolation.prepare.call_args_list} == {1}
     publisher.open_pull_request.assert_called_once_with(task, "agent/task-1")
     assert task.pull_request_url == "https://example/pull/2"
+
+
+def with_board(pipeline, attempts: int = 0):
+    moves: list[str] = []
+    board = MagicMock()
+    board.move.side_effect = lambda task, column: moves.append(column)
+    service = PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        max_fix_attempts=attempts,
+        board=board,
+    )
+    return service, moves
+
+
+def test_card_moves_through_every_stage_when_the_task_completes(pipeline) -> None:
+    service, moves = with_board(pipeline)
+
+    service.run(1)
+
+    # No pull request was opened, so nothing is left to wait for.
+    assert moves == ["Building", "Testing", "Checks", "Reviewing", "Done"]
+
+
+def test_card_waits_in_pr_open_when_a_pull_request_exists(pipeline) -> None:
+    service, moves = with_board(pipeline)
+    pipeline.task.pull_request_url = "https://github.com/o/r/pull/3"
+
+    service.run(1)
+
+    assert moves[-1] == "PR open"
+
+
+def test_card_shows_fixing_while_the_builder_repairs_a_failure(pipeline) -> None:
+    pipeline.verification_runner.run_checks.side_effect = [
+        failing_check(),
+        passing_checks(),
+    ]
+    service, moves = with_board(pipeline, attempts=1)
+
+    service.run(1)
+
+    assert moves == [
+        "Building",
+        "Testing",
+        "Checks",
+        "Fixing",
+        "Testing",
+        "Checks",
+        "Reviewing",
+        "Done",
+    ]
+
+
+def test_card_moves_to_failed_when_the_task_fails(pipeline) -> None:
+    pipeline.results["builder"] = AgentExecutionResult(
+        return_code=1, stdout="", stderr="crash", process_id=1
+    )
+    service, moves = with_board(pipeline)
+
+    service.run(1)
+
+    assert moves == ["Building", "Failed"]

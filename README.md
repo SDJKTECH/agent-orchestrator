@@ -140,6 +140,47 @@ python demo/run_demo.py [--delay 10] [--keep]
 Pause, resume and cancel act on in-memory process state, so they only work against
 the API process that started the agents.
 
+## GitHub Projects board
+
+Instead of the `agent-task` label, a GitHub **Projects (v2) board** can drive the
+orchestrator. An issue in the **Todo** column is picked up, and its card is moved
+automatically as the agents progress:
+
+| Column | When |
+|---|---|
+| Todo | you put the card here - this starts the work |
+| Queued | imported, waiting for a free agent slot |
+| Building / Testing / Checks / Reviewing | that agent (or the pytest/ruff gate) is running |
+| Fixing | a failure sent the task back to the builder |
+| PR open | the reviewer approved and a pull request was opened |
+| Done | the pull request was merged (checked on every poll) |
+| Failed | the task failed or was cancelled |
+
+Setup (once):
+
+1. Create a board per project (for example "CSV Summariser") and give its **Status**
+   field the ten columns above. **Link each board to this repository** (the repo's
+   Projects tab, "Link a project"). Add the issues to work on and set them to Todo.
+2. Create a token. A user-owned board needs a **classic** token with the `project`
+   scope (fine-grained tokens cannot reach user boards). Put it in `.env` as
+   `PROJECT_TOKEN` (`GITHUB_TOKEN` is used if it is not set). Never commit it.
+3. Run `python demo/run_live.py --backend rest --yes`. No board numbers are needed:
+   every open board linked to the repository is used, each one as its own project,
+   and a board linked later is picked up on the next poll. A linked board that lacks
+   the ten columns is skipped with a warning. With no linked board the runner falls
+   back to the `agent-task` label (`--labels` forces that). Settings:
+   `ISSUE_SOURCE=project`; `PROJECT_NUMBERS=4,5` limits it to those boards.
+
+A brand-new project needs no set-up: the first poll adds the ten Status columns
+(keeping the ones it has). In the board use **Add item -> Create new issue** so
+the card is a real issue. A plain draft task is also converted to an issue, but
+that needs the token to have the `public_repo` scope (otherwise it is skipped and
+logged once).
+
+Notes: an issue is imported once, so moving a failed card back to Todo does not re-run
+it. Board errors are logged and never fail an agent run. The dashboard shows each
+task's board column as a chip.
+
 ## Live GitHub mode
 
 The orchestrator can watch the GitHub repo it lives in and run agents on new issues.

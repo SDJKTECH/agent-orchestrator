@@ -21,6 +21,7 @@ from orchestrator.app.core.logging_config import setup_logging
 from orchestrator.app.dashboard.routes import router as dashboard_router
 from orchestrator.app.db.database import SessionLocal, create_tables, engine
 from orchestrator.app.db.migrations import migrate_task_columns, migrate_usage_columns
+from orchestrator.app.github.board_reporter import make_board
 from orchestrator.app.github.poller import IntakePoller
 from orchestrator.app.github.reporter import make_reporter
 
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
                     task_id
                 ),
                 reporter=reporter,
+                board=make_board(current),
             )
             poller.start()
 

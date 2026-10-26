@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     verification_ruff_target: str = "orchestrator"
 
     # GitHub issue intake
-    issue_source: Literal["gh", "file"] = "gh"
+    issue_source: Literal["gh", "file", "project"] = "gh"
     issue_file_path: Path | None = None
     github_repo: str | None = None
     # "gh" uses the GitHub CLI; "rest" calls the GitHub API directly (no CLI).
@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     github_token: SecretStr | None = None
     # Only issues carrying this label are picked up (gh source only).
     issue_label: str | None = "agent-task"
+
+    # GitHub Projects (v2) board. With issue_source="project" the issues in the
+    # board's Todo column are picked up, and the orchestrator moves each card
+    # through the columns as its agents progress. Projects need the GraphQL API;
+    # a user-owned board needs a classic token with the `project` scope.
+    project_owner: str | None = None
+    project_number: int | None = Field(default=None, ge=1)
+    # Several boards, one per project: "4,5,6". Combined with project_number.
+    project_numbers: str | None = None
+    project_owner_type: Literal["user", "org"] = "user"
+    # Falls back to github_token when not set.
+    project_token: SecretStr | None = None
 
     # Live intake: poll for new issues and run the pipeline automatically.
     # 0 disables polling.

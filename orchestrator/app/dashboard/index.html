@@ -484,6 +484,8 @@ function renderCard(task) {
       el("div", { class: "title" },
         el("span", { class: "id", text: `#${task.id} ` }), task.title),
       task.milestone ? el("span", { class: "chip", title: "GitHub milestone", text: task.milestone }) : null,
+      task.project ? el("span", { class: "chip", title: "Project (GitHub Projects board)", text: task.project }) : null,
+      task.board_column ? el("span", { class: "chip", title: "GitHub Projects board column", text: "Board: " + task.board_column }) : null,
       task.github_issue_number
         ? el("span", { class: "meta" }, task.issue_url ? link(task.issue_url, `issue #${task.github_issue_number}`) : `issue #${task.github_issue_number}`)
         : null,

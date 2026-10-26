@@ -10,12 +10,26 @@ from sqlalchemy.orm import Session
 from orchestrator.app.agents.agent_service import AgentService
 from orchestrator.app.agents.process_control import ProcessControl, process_control
 from orchestrator.app.db.models import Task, TaskStatus
+from orchestrator.app.github.board_reporter import BoardMover
+from orchestrator.app.github.projects import (
+    BUILDING,
+    CHECKS,
+    DONE,
+    FAILED,
+    FIXING,
+    PR_OPEN,
+    REVIEWING,
+    TESTING,
+)
 from orchestrator.app.github.publisher import PullRequestPublisher
 from orchestrator.app.pipeline.stage_isolation import StageIsolation
 
 logger = logging.getLogger(__name__)
 
 PIPELINE_STAGES = ("builder", "tester", "reviewer")
+
+# The board column shown while each agent works.
+_ROLE_COLUMN = {"builder": BUILDING, "tester": TESTING, "reviewer": REVIEWING}
 
 # How much of a failure report is passed back to the builder.
 MAX_FEEDBACK_CHARS = 3000
@@ -78,6 +92,7 @@ class PipelineService:
         isolation: StageIsolation | None = None,
         publisher: PullRequestPublisher | None = None,
         max_fix_attempts: int = 0,
+        board: BoardMover | None = None,
     ) -> None:
         self.db = db
         self.control = control or process_control
@@ -85,6 +100,11 @@ class PipelineService:
         self.isolation = isolation
         self.publisher = publisher
         self.max_fix_attempts = max_fix_attempts
+        self.board = board
+
+    def _move_card(self, task: Task, column: str) -> None:
+        if self.board is not None:
+            self.board.move(task, column)
 
     def run(self, task_id: int) -> Task:
         """Execute every stage, stopping at the first failure or cancellation."""
@@ -133,6 +153,10 @@ class PipelineService:
 
             task.current_stage = role
             self.db.commit()
+            self._move_card(
+                task,
+                FIXING if role == "builder" and attempt > 1 else _ROLE_COLUMN[role],
+            )
 
             workspace = self.isolation.prepare(task, role) if self.isolation else None
 
@@ -169,6 +193,7 @@ class PipelineService:
                 chain.pushed[role] = outcome.pushed
 
             if role == "tester":
+                self._move_card(task, CHECKS)
                 passed = self.agents.run_verification(task, stage.worktree_path)
 
                 if self.control.is_cancelled(task.id):
@@ -218,6 +243,11 @@ class PipelineService:
     def _finish(self, task: Task, status: TaskStatus) -> Task:
         task.status = status
         self.db.commit()
+        if status == TaskStatus.COMPLETED:
+            # Without a pull request there is nothing left to wait for.
+            self._move_card(task, PR_OPEN if task.pull_request_url else DONE)
+        else:
+            self._move_card(task, FAILED)
         logger.info(
             "Pipeline finished: task_id=%s status=%s stage=%s",
             task.id,

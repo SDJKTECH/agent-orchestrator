@@ -36,6 +36,11 @@ from run_demo import ROOT, Api, say, wait_for_server  # noqa: E402
 from orchestrator.app.core.config import Settings  # noqa: E402
 from orchestrator.app.core.exceptions import OrchestratorError  # noqa: E402
 from orchestrator.app.github.client import GitHubApi, detect_github_repo  # noqa: E402
+from orchestrator.app.github.projects import (  # noqa: E402
+    BoardRef,
+    ProjectsApi,
+    discover_boards,
+)
 
 LABEL = "agent-task"
 REQUIRED_AGENTS = ("builder", "tester", "reviewer")
@@ -86,8 +91,51 @@ def preflight(args) -> tuple[str, str, GitHubApi]:
         )
 
     api = GitHubApi(repo, load_token())
-    ensure_label(api, backend, repo, args.create_label)
+    # With a project token the run works from the repository's Projects boards,
+    # including ones that are linked while it runs. Otherwise it uses the label.
+    args.project_mode = not args.labels and has_project_token()
+    args.boards = find_boards(args, repo) if args.project_mode else []
+    if not args.project_mode:
+        ensure_label(api, backend, repo, args.create_label)
     return backend, repo, api
+
+
+def has_project_token() -> bool:
+    settings = Settings(_env_file=ROOT / ".env")
+    return (settings.project_token or settings.github_token) is not None
+
+
+def find_boards(args, repo: str) -> list[ProjectsApi]:
+    """The Projects boards linked to the repository right now (for the banner).
+
+    Boards without the orchestrator's columns are fine: the server adds them.
+    """
+    settings = Settings(_env_file=ROOT / ".env")
+    secret = (settings.project_token or settings.github_token).get_secret_value()
+
+    try:
+        if args.project_number:
+            owner = repo.split("/")[0]
+            refs = [
+                BoardRef(n, f"Project {n}", owner, "user") for n in args.project_number
+            ]
+        else:
+            refs = discover_boards(secret, repo)
+    except OrchestratorError as exc:
+        fail(f"cannot list the repository's project boards: {exc}")
+
+    boards = []
+    for ref in refs:
+        board = ProjectsApi(ref.owner, ref.number, secret, ref.owner_type)
+
+        try:
+            board.load()
+        except OrchestratorError as exc:
+            fail(str(exc))
+
+        boards.append(board)
+
+    return boards
 
 
 def load_token() -> str | None:
@@ -223,6 +271,17 @@ def main() -> None:
         default=2,
         help="times the builder may be sent back to fix a failure (0 = never)",
     )
+    parser.add_argument(
+        "--labels",
+        action="store_true",
+        help="use the agent-task label instead of the repository's project boards",
+    )
+    parser.add_argument(
+        "--project-number",
+        type=int,
+        nargs="+",
+        help=argparse.SUPPRESS,  # override: only these boards, not all linked ones
+    )
     parser.add_argument("--create-label", action="store_true")
     parser.add_argument("--create-issue", metavar="TITLE")
     parser.add_argument("--issue-body", default="Created for the orchestrator demo.")
@@ -244,7 +303,15 @@ def main() -> None:
     read_only_api = backend == "rest" and not github.can_write
 
     say(f"Repository:      {repo}   (GitHub access: {backend})")
-    say(f"Issue label:     {LABEL}   poll every {args.poll}s")
+    if args.project_mode:
+        names = ", ".join(f"{board.title} ({board.number})" for board in args.boards)
+        say(f"Projects:        {names or 'none linked yet'}")
+        say(
+            "                 every project linked to the repo is watched, new ones too"
+        )
+    else:
+        say(f"Issue label:     {LABEL}")
+    say(f"Poll every:      {args.poll}s")
     say(
         f"Agents:          {'STUB (fake claude)' if args.stub else 'real Claude'}"
         f", budget ${args.budget} per run, {args.concurrency} at once"
@@ -268,7 +335,12 @@ def main() -> None:
     env = {
         **os.environ,
         "REPOSITORY_PATH": str(ROOT),
-        "ISSUE_SOURCE": "gh",
+        "ISSUE_SOURCE": "project" if args.project_mode else "gh",
+        **(
+            {"PROJECT_NUMBERS": ",".join(map(str, args.project_number))}
+            if args.project_mode and args.project_number
+            else {}
+        ),
         "GITHUB_BACKEND": backend,
         "ISSUE_LABEL": LABEL,
         "GITHUB_REPO": repo,
@@ -309,7 +381,10 @@ def main() -> None:
         say(f"Dashboard:  {server_api.base_url}/dashboard   <- open this in a browser")
         say(f"API docs:   {server_api.base_url}/docs   (Ctrl+C to stop)")
         say(f"Server log: {log_file}\n")
-        say(f"Add the '{LABEL}' label to an issue on GitHub to start an agent run.\n")
+        if args.project_mode:
+            say("Put an issue card in a project's Todo column to start an agent run.\n")
+        else:
+            say(f"Add the '{LABEL}' label to an issue to start an agent run.\n")
 
         last = ""
         while True:

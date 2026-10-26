@@ -42,6 +42,9 @@ def migrate_task_columns(engine: Engine) -> None:
     migrations = {
         "current_stage": "VARCHAR(50)",
         "pull_request_url": "VARCHAR(500)",
+        "project_item_id": "VARCHAR(100)",
+        "board_number": "INTEGER",
+        "board_column": "VARCHAR(50)",
     }
 
     with engine.begin() as connection:
