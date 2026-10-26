@@ -523,3 +523,208 @@ def test_cli_missing_file_reports_error(tmp_path, capsys):
     captured = capsys.readouterr()
     assert exit_code == 1
     assert captured.err.startswith("error: ")
+
+
+def test_cli_header_only_file_json_output(tmp_path, capsys):
+    path = _write_csv(tmp_path, "a,b\n")
+
+    exit_code = main([str(path), "--json"])
+
+    data = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert data["rows"] == 0
+    assert [column["type"] for column in data["columns"]] == [TEXT, TEXT]
+    assert all(column["top"] == [] for column in data["columns"])
+
+
+def test_cli_empty_file_json_reports_error(tmp_path, capsys):
+    path = _write_csv(tmp_path, "")
+
+    exit_code = main([str(path), "--json"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+
+
+def test_cli_directory_path_reports_error(tmp_path, capsys):
+    exit_code = main([str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+
+
+def test_cli_non_utf8_file_reports_error(tmp_path, capsys):
+    path = tmp_path / "latin1.csv"
+    path.write_bytes("name\ncaf\xe9\n".encode("latin-1"))
+
+    exit_code = main([str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+
+
+# --- additional coverage: type detection edge cases --------------------------
+
+
+def test_integer_column_with_float_looking_zero_is_float():
+    assert detect_type(["1", "2.0"]) == FLOAT
+
+
+def test_date_rejects_non_leap_february_29():
+    assert detect_type(["2023-02-29"]) == TEXT
+    assert detect_type(["2024-02-29", "2023-02-29"]) == TEXT
+
+
+def test_date_rejects_out_of_range_month_and_day():
+    assert detect_type(["2024-13-01"]) == TEXT
+    assert detect_type(["2024-00-10"]) == TEXT
+    assert detect_type(["2024-01-32"]) == TEXT
+
+
+def test_date_with_surrounding_whitespace_is_date():
+    assert detect_type([" 2024-01-05 ", ""]) == DATE
+
+
+def test_date_column_mixed_with_text_is_text():
+    assert detect_type(["2024-01-05", "2024-01-06", "soon"]) == TEXT
+
+
+def test_boolean_column_with_empty_cells_stats_ignore_missing():
+    stats = column_stats("b", ["", "", "FALSE"])
+
+    assert stats["type"] == BOOLEAN
+    assert stats["count"] == 1
+    assert stats["missing"] == 2
+    assert stats["unique"] == 1
+
+
+# --- additional coverage: column_stats edge cases ----------------------------
+
+
+def test_integer_stats_when_all_values_equal():
+    stats = column_stats("n", ["7", "7", "7"])
+
+    assert stats["min"] == 7
+    assert stats["max"] == 7
+    assert stats["mean"] == pytest.approx(7.0)
+    assert stats["median"] == 7
+    assert stats["unique"] == 1
+
+
+def test_float_stats_single_value():
+    stats = column_stats("x", ["2.5", ""])
+
+    assert stats["type"] == FLOAT
+    assert stats["count"] == 1
+    assert stats["missing"] == 1
+    assert stats["min"] == pytest.approx(2.5)
+    assert stats["max"] == pytest.approx(2.5)
+    assert stats["median"] == pytest.approx(2.5)
+
+
+def test_numeric_column_with_only_whitespace_cells_is_text():
+    stats = column_stats("x", ["  ", "", "\t"])
+
+    assert stats["type"] == TEXT
+    assert stats["count"] == 0
+    assert stats["missing"] == 3
+
+
+def test_text_stats_top_values_when_all_unique():
+    stats = column_stats("t", ["c", "a", "b"])
+
+    assert stats["unique"] == 3
+    assert [entry["value"] for entry in stats["top"]] == ["c", "a", "b"]
+    assert all(entry["count"] == 1 for entry in stats["top"])
+
+
+# --- additional coverage: summarise file edge cases --------------------------
+
+
+def test_summarise_trims_header_names(tmp_path):
+    path = _write_csv(tmp_path, "  name , age \nann,30\n")
+
+    summary = summarise(path)
+
+    assert [column["name"] for column in summary["columns"]] == ["name", "age"]
+    assert summary["columns"][1]["type"] == INTEGER
+
+
+def test_summarise_ignores_cells_beyond_header(tmp_path):
+    path = _write_csv(tmp_path, "a,b\n1,x,extra\n2,y,more,stuff\n")
+
+    summary = summarise(path)
+
+    assert summary["rows"] == 2
+    assert [column["name"] for column in summary["columns"]] == ["a", "b"]
+    assert summary["columns"][0]["max"] == 2
+
+
+def test_summarise_bom_only_file_raises(tmp_path):
+    path = tmp_path / "bom_only.csv"
+    path.write_bytes("﻿".encode())
+
+    with pytest.raises(ValueError, match="empty or has no header"):
+        summarise(path)
+
+
+def test_summarise_rows_of_only_empty_cells_are_skipped_as_blank(tmp_path):
+    # A line of only commas has no non-empty cell, so the reader treats it as a
+    # blank line and skips it; the row is not counted in "rows".
+    path = _write_csv(tmp_path, "a,b\n,\n,\n")
+
+    summary = summarise(path)
+
+    assert summary["rows"] == 0
+    for column in summary["columns"]:
+        assert column["type"] == TEXT
+        assert column["count"] == 0
+        assert column["missing"] == 0
+        assert column["top"] == []
+
+
+def test_summarise_partly_empty_rows_count_missing_cells(tmp_path):
+    path = _write_csv(tmp_path, "a,b\n1,\n,\n2,\n")
+
+    summary = summarise(path)
+
+    assert summary["rows"] == 2
+    a, b = summary["columns"]
+    assert a["type"] == INTEGER
+    assert a["count"] == 2
+    assert a["missing"] == 0
+    assert b["type"] == TEXT
+    assert b["count"] == 0
+    assert b["missing"] == 2
+
+
+# --- additional coverage: format_table rendering -----------------------------
+
+
+def test_format_table_renders_float_stats_compactly(tmp_path):
+    path = _write_csv(tmp_path, "x\n1.0\n2.0\n5.0\n")
+
+    text = format_table(summarise(path))
+
+    # mean is 8/3 -> formatted with 4 significant digits
+    assert "2.667" in text
+    assert "float" in text
+
+
+def test_format_table_all_empty_column_does_not_crash(tmp_path):
+    path = _write_csv(tmp_path, "a,b\n1,\n2,\n")
+
+    text = format_table(summarise(path))
+    lines = text.splitlines()
+
+    # title, blank line, header, separator, then one line per column
+    assert lines[0] == "Rows: 2"
+    assert len(lines) == 6
+    assert "integer" in text
+    assert "text" in lines[-1]
