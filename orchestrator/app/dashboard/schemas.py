@@ -74,6 +74,19 @@ class DashboardMilestone(BaseModel):
     usage: UsageTotals
 
 
+class DashboardProject(BaseModel):
+    """One project (a GitHub Projects board linked to the repository)."""
+
+    name: str
+    board_number: int | None
+    task_count: int
+    active_count: int
+    completed_count: int
+    failed_count: int
+    columns: dict[str, int]
+    usage: UsageTotals
+
+
 class DashboardSummary(BaseModel):
     status_counts: dict[str, int]
     active_agents: int
@@ -86,5 +99,6 @@ class DashboardOverview(BaseModel):
     generated_at: datetime
     repo: str | None
     summary: DashboardSummary
+    projects: list[DashboardProject] = []
     milestones: list[DashboardMilestone]
     tasks: list[DashboardTask]

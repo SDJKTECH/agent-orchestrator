@@ -115,6 +115,14 @@
   .ms-row .num { color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .ms-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
   .ms-bar > span { display: block; height: 100%; background: var(--good); }
+  .pj-row {
+    display: grid; grid-template-columns: minmax(160px, 1.4fr) 1fr 1fr 1.2fr; gap: 4px 12px;
+    align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px;
+  }
+  .pj-row .name { font-weight: 600; }
+  .pj-cols { display: flex; flex-wrap: wrap; gap: 4px; grid-column: 1 / -1; }
+  .pj-cols .chip { font-weight: 500; }
+  @media (max-width: 720px) { .pj-row { grid-template-columns: 1fr 1fr; } }
   .chip {
     font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
     border: 1px solid var(--line-strong); color: var(--ink-2); white-space: nowrap;
@@ -204,9 +212,12 @@
 
   <section class="tiles" aria-label="Summary" id="tiles"></section>
 
+  <section class="milestones" id="projects" aria-label="Projects" hidden></section>
   <section class="milestones" id="milestones" aria-label="Milestones" hidden></section>
 
   <div class="filters">
+    <label for="project-filter">Project</label>
+    <select id="project-filter"><option value="">All projects</option></select>
     <label for="filter">Show</label>
     <select id="filter">
       <option value="all">All tasks</option>
@@ -327,13 +338,53 @@ function renderTiles(summary) {
   );
 }
 
+const BOARD_ORDER = ["Todo", "Queued", "Building", "Testing", "Checks", "Reviewing",
+  "Fixing", "PR open", "Done", "Failed"];
+
+function renderProjects(projects) {
+  const box = document.getElementById("projects");
+  box.hidden = projects.length === 0;
+  box.replaceChildren(
+    el("h2", { text: "Projects" }),
+    ...projects.map((project) => {
+      const percent = Math.round((100 * project.completed_count) / project.task_count);
+      const known = BOARD_ORDER.filter((name) => project.columns[name]);
+      const other = Object.keys(project.columns).filter((name) => !BOARD_ORDER.includes(name));
+      return el("div", { class: "pj-row" },
+        el("div", {}, el("span", { class: "name", text: project.name }),
+          project.board_number ? el("span", { class: "meta", text: `  board #${project.board_number}` }) : null),
+        el("div", { class: "ms-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100",
+          "aria-valuenow": String(percent), "aria-label": `${project.name} progress` }, el("span", { style: `width:${percent}%` })),
+        el("div", { class: "num", text: `${project.completed_count} of ${project.task_count} done`
+          + (project.active_count ? ` · ${project.active_count} running` : "")
+          + (project.failed_count ? ` · ${project.failed_count} failed` : "") }),
+        el("div", { class: "num", text: `${fmtCost(project.usage.cost_usd)} · ${fmtInt(project.usage.input_tokens + project.usage.output_tokens)} tokens` }),
+        known.length || other.length
+          ? el("div", { class: "pj-cols", "aria-label": "Cards per board column" },
+              [...known, ...other].map((name) => el("span", { class: "chip", text: `${name} ${project.columns[name]}` })))
+          : null);
+    }));
+}
+
+function syncProjectFilter(projects) {
+  const select = document.getElementById("project-filter");
+  const names = projects.map((project) => project.name);
+  const current = select.value;
+  const have = [...select.options].slice(1).map((option) => option.value);
+  if (names.join("\u0000") !== have.join("\u0000")) {
+    select.replaceChildren(el("option", { value: "", text: "All projects" }),
+      ...names.map((name) => el("option", { value: name, text: name })));
+    select.value = names.includes(current) ? current : "";
+  }
+}
+
 function renderMilestones(milestones) {
   const used = milestones.filter((m) => m.task_count > 0);
   const box = document.getElementById("milestones");
   box.hidden = used.length === 0;
   box.replaceChildren(
     el("h2", { text: "Milestones" }),
-    used.map((m) => {
+    ...used.map((m) => {
       const percent = Math.round((100 * m.completed_count) / m.task_count);
       return el("div", { class: "ms-row" },
         el("div", {}, el("span", { class: "code", text: m.code }), ` ${m.title.replace(m.code, "").replace(/^[\s–-]+/, "")}`),
@@ -514,6 +565,8 @@ function render() {
   const data = state.data;
   if (!data) return;
   renderTiles(data.summary);
+  renderProjects(data.projects || []);
+  syncProjectFilter(data.projects || []);
   renderMilestones(data.milestones);
   document.getElementById("repo").replaceChildren(
     data.repo ? link(`https://github.com/${data.repo}`, data.repo) : "");
@@ -522,7 +575,9 @@ function render() {
   syncButton.hidden = data.milestones.length === 0;
 
   const filter = document.getElementById("filter").value;
-  const visible = data.tasks.filter((task) => matchesFilter(task, filter));
+  const project = document.getElementById("project-filter").value;
+  const visible = data.tasks.filter((task) =>
+    matchesFilter(task, filter) && (!project || task.project === project));
   document.getElementById("count").textContent =
     `${visible.length} of ${data.tasks.length} tasks` + (data.summary.polling_enabled ? " · auto-import on" : "");
 
@@ -604,6 +659,7 @@ document.getElementById("toggle-live").addEventListener("click", (event) => {
 });
 
 document.getElementById("filter").addEventListener("change", render);
+document.getElementById("project-filter").addEventListener("change", render);
 
 document.getElementById("sync").addEventListener("click", async (event) => {
   const button = event.target;

@@ -11,6 +11,7 @@ from orchestrator.app.dashboard.schemas import (
     DashboardCheck,
     DashboardMilestone,
     DashboardOverview,
+    DashboardProject,
     DashboardSummary,
     DashboardTask,
     StageInfo,
@@ -23,6 +24,7 @@ from orchestrator.app.db.models import (
     PAUSABLE_STATUSES,
     AgentRun,
     Milestone,
+    Project,
     Task,
     TaskStatus,
 )
@@ -201,6 +203,52 @@ def _task_view(task: Task, repo: str | None) -> DashboardTask:
     )
 
 
+def _projects(session: Session) -> list[DashboardProject]:
+    """Totals per project, over every task (not only the listed ones)."""
+    active_statuses = PAUSABLE_STATUSES | {TaskStatus.PAUSED}
+    projects = []
+
+    for project in session.scalars(
+        select(Project)
+        .options(
+            selectinload(Project.milestones)
+            .selectinload(Milestone.tasks)
+            .selectinload(Task.agent_runs)
+        )
+        .order_by(Project.id)
+    ):
+        tasks = [task for ms in project.milestones for task in ms.tasks]
+
+        if not tasks:
+            continue
+
+        columns: dict[str, int] = {}
+        for task in tasks:
+            if task.board_column:
+                columns[task.board_column] = columns.get(task.board_column, 0) + 1
+
+        numbers = [task.board_number for task in tasks if task.board_number]
+        projects.append(
+            DashboardProject(
+                name=project.name,
+                board_number=max(set(numbers), key=numbers.count) if numbers else None,
+                task_count=len(tasks),
+                active_count=sum(task.status in active_statuses for task in tasks),
+                completed_count=sum(
+                    task.status == TaskStatus.COMPLETED for task in tasks
+                ),
+                failed_count=sum(
+                    task.status in (TaskStatus.FAILED, TaskStatus.CANCELLED)
+                    for task in tasks
+                ),
+                columns=columns,
+                usage=_usage([run for task in tasks for run in task.agent_runs]),
+            )
+        )
+
+    return projects
+
+
 def build_overview(
     session: Session,
     *,
@@ -260,6 +308,7 @@ def build_overview(
         )
 
     return DashboardOverview(
+        projects=_projects(session),
         generated_at=datetime.now(UTC),
         repo=repo,
         summary=DashboardSummary(

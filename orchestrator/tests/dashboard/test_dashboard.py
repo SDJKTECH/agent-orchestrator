@@ -314,6 +314,52 @@ def test_overview_reports_progress_and_cost_per_milestone(
     assert milestone.usage.cost_usd == pytest.approx(1.0)
 
 
+def test_overview_summarises_each_project_and_its_board_columns(
+    routes_client, seeded
+) -> None:
+    seeded(
+        TaskStatus.RUNNING,
+        runs=[("builder", "RUNNING", 5)],
+        board_number=5,
+        board_column="Building",
+    )
+    seeded(
+        TaskStatus.COMPLETED,
+        runs=[("builder", "COMPLETED", 5)],
+        board_number=5,
+        board_column="PR open",
+    )
+    seeded(TaskStatus.FAILED, board_number=5, board_column="Failed")
+
+    result = overview(routes_client)
+    project = result.projects[0]
+
+    assert project.name == "dash-project"
+    assert project.board_number == 5
+    assert (project.task_count, project.active_count) == (3, 1)
+    assert (project.completed_count, project.failed_count) == (1, 1)
+    assert project.columns == {"Building": 1, "PR open": 1, "Failed": 1}
+    assert project.usage.input_tokens == 10
+    assert result.tasks[0].project == "dash-project"
+
+
+def test_projects_without_tasks_are_not_listed(routes_client, seeded) -> None:
+    seeded(TaskStatus.QUEUED)
+    with routes_client.session_factory() as session:
+        session.add(Project(name="empty-project"))
+        session.commit()
+
+    assert [p.name for p in overview(routes_client).projects] == ["dash-project"]
+
+
+def test_dashboard_page_has_a_projects_panel_and_filter() -> None:
+    source = _dashboard_source()
+
+    assert 'id="projects"' in source
+    assert 'id="project-filter"' in source
+    assert "function renderProjects" in source
+
+
 def test_fix_attempt_resets_later_stages_on_the_same_branch(
     routes_client, seeded
 ) -> None:
