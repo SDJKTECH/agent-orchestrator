@@ -181,6 +181,49 @@ Notes: an issue is imported once, so moving a failed card back to Todo does not 
 it. Board errors are logged and never fail an agent run. The dashboard shows each
 task's board column as a chip.
 
+## Jira as the source of tasks
+
+Jira Cloud can be the source of tasks instead of GitHub issues. The orchestrator
+executes them, and both Jira and GitHub show the progress.
+
+| Where | What you see |
+|---|---|
+| Jira status | To Do -> **In Progress** (picked up, while agents work) -> **In Review** (PR open) -> **Done** (PR merged) |
+| Jira comments | pick-up (task and branch), each fix round, then the outcome: agent runs, cost, checks, PR link |
+| GitHub | branch `agent/task-N`, and a PR whose title and commits carry the Jira key (`PROJ-12: ...`) and whose body links the Jira issue, so Jira's development panel finds it |
+
+Setup (once):
+
+1. Create an API token (https://id.atlassian.com/manage-profile/security/api-tokens) and
+   set `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` and `JIRA_PROJECT` in `.env`
+   (see `.env.example`). Never commit the token.
+2. Start with `python demo/run_live.py --jira --backend rest --yes`.
+3. Move an issue into the trigger status (`JIRA_TRIGGER_STATUS`, default "To Do") to
+   have it picked up. The Jira project becomes a project in the dashboard and the
+   first fix version becomes the milestone.
+
+Workflows differ between Jira projects, so the statuses can be changed with
+`JIRA_STATUS_MAP` (for example `PR open=Code Review,Failed=Blocked`; `-` leaves the
+issue where it is). If the workflow has no step to a status, the orchestrator logs a
+warning and carries on. Notes: an issue is imported once, so moving a failed issue
+back to the trigger status does not re-run it; Jira errors are logged and never fail an
+agent run.
+
+### Tasks that depend on each other (Jira)
+
+When new Jira tasks arrive, a read-only **planner** agent (`.claude/agents/planner.md`,
+sonnet/medium unless you change the file) reads the open tasks' titles and descriptions
+and decides which ones need another task's code. Jira "is blocked by" links you set
+yourself count too. A dependent task is held (status **Blocked** on the dashboard, a
+"Waiting for CSV-2 ..." comment on the Jira issue, and an "is blocked by" link added in
+Jira for planner-found dependencies so you can see or delete it). It starts only after the
+blocker's pull request is merged: its worktree is then cut from the freshly fetched
+`origin/main`, so it builds on the merged code. Independent tasks run at once as before.
+
+Notes: the planner is conservative (unsure means independent), a failed planner run means
+no dependencies, a dependency that would form a cycle is ignored, and a task whose
+blocker failed stays Blocked. Turn it off with `PLAN_DEPENDENCIES=false`.
+
 ## Live GitHub mode
 
 The orchestrator can watch the GitHub repo it lives in and run agents on new issues.

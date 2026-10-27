@@ -29,6 +29,8 @@ FIXING = "Fixing"
 PR_OPEN = "PR open"
 DONE = "Done"
 FAILED = "Failed"
+# Shown on Jira only: the task waits for others to be merged.
+BLOCKED = "Blocked"
 
 BOARD_COLUMNS = (
     TODO,

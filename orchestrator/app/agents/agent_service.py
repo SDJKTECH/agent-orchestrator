@@ -196,6 +196,7 @@ class AgentService:
             model=model,
             effort=effort,
             role=agent_role,
+            definition=agent_definition,
         )
         model = routing_decision.model
         effort = routing_decision.effort

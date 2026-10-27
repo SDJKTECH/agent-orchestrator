@@ -3,9 +3,10 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from orchestrator.app.api.schemas import AgentRunUsageResponse
+from orchestrator.app.core.config import get_settings
 from orchestrator.app.dashboard.schemas import (
     BranchInfo,
     DashboardCheck,
@@ -28,6 +29,7 @@ from orchestrator.app.db.models import (
     Task,
     TaskStatus,
 )
+from orchestrator.app.planning.dependencies import get_blockers
 
 AGENT_ROLES = ("builder", "tester", "reviewer")
 
@@ -177,11 +179,27 @@ def _task_view(task: Task, repo: str | None) -> DashboardTask:
     if repo and task.github_issue_number:
         issue_url = f"https://github.com/{repo}/issues/{task.github_issue_number}"
 
+    jira_url = None
+    jira_base = get_settings().jira_base_url
+    if task.jira_key and jira_base:
+        jira_url = f"{jira_base.rstrip('/')}/browse/{task.jira_key}"
+
+    session = object_session(task)
+    waiting = []
+    for entry in get_blockers(task):
+        blocker = session.get(Task, entry["task_id"]) if session else None
+        waiting.append(
+            blocker.jira_key or f"#{blocker.id}" if blocker else str(entry["task_id"])
+        )
+
     return DashboardTask(
         id=task.id,
         title=task.title,
         github_issue_number=task.github_issue_number,
         issue_url=issue_url,
+        jira_key=task.jira_key,
+        jira_url=jira_url,
+        blocked_by=waiting,
         status=task.status,
         milestone=task.milestone.code if task.milestone else None,
         board_column=task.board_column,

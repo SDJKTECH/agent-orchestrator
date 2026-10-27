@@ -48,6 +48,9 @@ class DashboardTask(BaseModel):
     title: str
     github_issue_number: int | None
     issue_url: str | None
+    jira_key: str | None = None
+    jira_url: str | None = None
+    blocked_by: list[str] = []
     status: TaskStatus
     milestone: str | None
     board_column: str | None = None

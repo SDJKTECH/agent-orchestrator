@@ -24,6 +24,7 @@ def utc_now() -> datetime:
 
 class TaskStatus(str, Enum):
     QUEUED = "queued"
+    BLOCKED = "blocked"
     STARTING = "starting"
     RUNNING = "running"
     VERIFYING = "verifying"
@@ -35,7 +36,11 @@ class TaskStatus(str, Enum):
 
 # Which statuses allow which control action (shared by the API and dashboard).
 PAUSABLE_STATUSES = {TaskStatus.STARTING, TaskStatus.RUNNING, TaskStatus.VERIFYING}
-CANCELLABLE_STATUSES = PAUSABLE_STATUSES | {TaskStatus.QUEUED, TaskStatus.PAUSED}
+CANCELLABLE_STATUSES = PAUSABLE_STATUSES | {
+    TaskStatus.QUEUED,
+    TaskStatus.BLOCKED,
+    TaskStatus.PAUSED,
+}
 FINISHED_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 
 
@@ -99,6 +104,10 @@ class Task(Base):
     project_item_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     board_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     board_column: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Key of the Jira issue the task came from (for example "PROJ-123").
+    jira_key: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Tasks that must be merged first: JSON list of {"task_id": N, "reason": "..."}.
+    blocked_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )

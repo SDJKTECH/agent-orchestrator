@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from orchestrator.app.agents.execution_manager import ExecutionManager
 from orchestrator.app.core.config import Settings
 from orchestrator.app.db.models import Milestone, Project, Task, TaskStatus
-from orchestrator.app.github.board_reporter import BoardMover
+from orchestrator.app.github.board_reporter import TaskBoard
 from orchestrator.app.github.intake import (
     MILESTONE_CODE,
     MILESTONE_TITLE,
@@ -19,8 +19,15 @@ from orchestrator.app.github.intake import (
     build_issue_source,
     sync_issues,
 )
-from orchestrator.app.github.projects import QUEUED
+from orchestrator.app.github.projects import BLOCKED, QUEUED
 from orchestrator.app.github.reporter import GhIssueReporter, picked_up_message
+from orchestrator.app.planning.dependencies import (
+    Edge,
+    assign_blockers,
+    open_tasks,
+    release_ready,
+)
+from orchestrator.app.planning.planner import DependencyPlanner
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +43,8 @@ class IntakePoller:
         run_pipeline: Callable[[int], None],
         source: IssueSource | None = None,
         reporter: GhIssueReporter | None = None,
-        board: BoardMover | None = None,
+        board: TaskBoard | None = None,
+        planner: DependencyPlanner | None = None,
     ) -> None:
         if settings.repository_path is None:
             raise ValueError("repository_path is required for issue polling.")
@@ -49,6 +57,14 @@ class IntakePoller:
         self.source = source
         self.reporter = reporter
         self.board = board
+        # Dependencies are worked out for Jira tasks only.
+        if (
+            planner is None
+            and settings.plan_dependencies
+            and settings.issue_source == "jira"
+        ):
+            planner = DependencyPlanner(settings)
+        self.planner = planner
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -89,6 +105,8 @@ class IntakePoller:
                 worktrees_root=self.repository_path.parent / "agent-worktrees",
             )
 
+            edges = self._plan(session, result.imported, result.links)
+
             for task in result.imported:
                 logger.info(
                     "Issue imported: issue=%s task_id=%s",
@@ -100,10 +118,23 @@ class IntakePoller:
                         task.github_issue_number, picked_up_message(task)
                     )
                 if self.board:
-                    self.board.move(task, QUEUED)
+                    blocked = task.status == TaskStatus.BLOCKED
+                    self.board.move(task, BLOCKED if blocked else QUEUED)
+
+            if self.board:
+                for edge in edges:
+                    if edge.inferred:
+                        self.board.link_blocks(edge.blocked, edge.blocker)
 
             if self.board:
                 self.board.sync_merged(session)
+                for task in release_ready(
+                    session,
+                    self.repository_path,
+                    self.settings.git_remote,
+                    self.settings.base_branch,
+                ):
+                    self.board.move(task, QUEUED)
 
             # Boards create their own projects, all working in this clone.
             queued_ids = list(
@@ -120,6 +151,29 @@ class IntakePoller:
             )
 
         return self._schedule(queued_ids)
+
+    def _plan(
+        self, session: Session, imported: list[Task], links: dict[int, list[str]]
+    ) -> list[Edge]:
+        """Work out what the newly imported tasks wait for. Never raises."""
+        if not imported or self.board is None:
+            return []
+
+        try:
+            batch = {
+                task.id: task for task in open_tasks(session, str(self.repository_path))
+            }
+            batch.update({task.id: task for task in imported})
+            inferred = (
+                self.planner.plan(sorted(batch.values(), key=lambda task: task.id))
+                if self.planner and len(batch) > 1
+                else {}
+            )
+            return assign_blockers(session, imported, inferred, links)
+        except Exception:
+            logger.exception("Dependency planning failed; tasks run independently")
+            session.rollback()
+            return []
 
     def _schedule(self, task_ids: list[int]) -> list[int]:
         scheduled: list[int] = []

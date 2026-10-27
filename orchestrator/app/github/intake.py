@@ -50,6 +50,10 @@ class Issue:
     # The Projects board the issue came from; each board is its own project.
     board_number: int | None = None
     board_title: str | None = None
+    # Set for Jira issues, which have no GitHub issue number (`number` is 0).
+    jira_key: str | None = None
+    # Jira keys this issue is blocked by (its "is blocked by" links).
+    blocked_by: list[str] = field(default_factory=list)
 
 
 class IssueSource(Protocol):
@@ -304,6 +308,12 @@ class CombinedIssueSource:
 
 def build_issue_source(settings: Settings) -> IssueSource:
     """Create the issue source selected in settings."""
+    if settings.issue_source == "jira":
+        # Imported here: the Jira source builds on `Issue` from this module.
+        from orchestrator.app.jira.source import make_jira_source
+
+        return make_jira_source(settings)
+
     if settings.issue_source == "project":
         if (settings.project_token or settings.github_token) is None:
             raise IssueSourceError(
@@ -352,8 +362,10 @@ def build_issue_source(settings: Settings) -> IssueSource:
 @dataclass
 class SyncResult:
     imported: list[Task] = field(default_factory=list)
-    skipped: list[int] = field(default_factory=list)
-    failed: dict[int, str] = field(default_factory=dict)
+    skipped: list[int | str] = field(default_factory=list)
+    failed: dict[int | str, str] = field(default_factory=dict)
+    # Task id -> Jira keys of the issues that block it.
+    links: dict[int, list[str]] = field(default_factory=dict)
 
 
 def milestone_for_issue(
@@ -441,23 +453,29 @@ def sync_issues(
     default = session.get(Milestone, milestone_id)
     project_id = default.project_id if default else None
 
-    existing_query = (
-        select(Task.github_issue_number)
-        .join(Milestone, Task.milestone_id == Milestone.id)
-        .where(Task.github_issue_number.is_not(None))
-    )
-    if default is not None and default.project.local_path:
-        existing_query = existing_query.join(
-            Project, Milestone.project_id == Project.id
-        ).where(Project.local_path == default.project.local_path)
-    else:
-        existing_query = existing_query.where(Milestone.project_id == project_id)
-    existing = set(session.scalars(existing_query))
+    def known(column):
+        query = (
+            select(column)
+            .join(Milestone, Task.milestone_id == Milestone.id)
+            .where(column.is_not(None))
+        )
+        if default is not None and default.project.local_path:
+            return query.join(Project, Milestone.project_id == Project.id).where(
+                Project.local_path == default.project.local_path
+            )
+        return query.where(Milestone.project_id == project_id)
+
+    existing = set(session.scalars(known(Task.github_issue_number)))
+    existing_jira = set(session.scalars(known(Task.jira_key)))
 
     result = SyncResult()
 
     for issue in issues:
-        if issue.number in existing:
+        if issue.jira_key:
+            if issue.jira_key in existing_jira:
+                result.skipped.append(issue.jira_key)
+                continue
+        elif issue.number in existing:
             result.skipped.append(issue.number)
             continue
 
@@ -478,16 +496,26 @@ def sync_issues(
                 title=issue.title[:MAX_TITLE_LENGTH],
                 description=issue.body[:MAX_DESCRIPTION_LENGTH],
                 worktrees_root=worktrees_root,
-                github_issue_number=issue.number,
+                github_issue_number=None if issue.jira_key else issue.number,
                 project_item_id=issue.project_item_id,
                 board_number=issue.board_number,
+                jira_key=issue.jira_key,
             )
         except (OrchestratorError, ValueError) as exc:
-            logger.warning("Issue import failed: issue=%s error=%s", issue.number, exc)
-            result.failed[issue.number] = str(exc)
+            logger.warning(
+                "Issue import failed: issue=%s error=%s",
+                issue.jira_key or issue.number,
+                exc,
+            )
+            result.failed[issue.jira_key or issue.number] = str(exc)
             continue
 
-        existing.add(issue.number)
+        if issue.jira_key:
+            existing_jira.add(issue.jira_key)
+            if issue.blocked_by:
+                result.links[task.id] = list(issue.blocked_by)
+        else:
+            existing.add(issue.number)
         result.imported.append(task)
 
     return result

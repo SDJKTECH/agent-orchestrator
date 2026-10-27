@@ -44,20 +44,21 @@ class Settings(BaseSettings):
     default_model: str = "sonnet"
     default_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
 
-    # Per-role routing used by the multi-agent pipeline. None falls back to
-    # the defaults above.
+    # Per-role routing used by the multi-agent pipeline. None means the model and
+    # effort written in the role's .claude/agents/<role>.md file are used, and the
+    # defaults above if that file does not set them.
     builder_model: str | None = None
-    builder_effort: EffortLevel | None = "high"
-    tester_model: str | None = "haiku"
-    tester_effort: EffortLevel | None = "medium"
-    reviewer_model: str | None = "opus"
-    reviewer_effort: EffortLevel | None = "high"
+    builder_effort: EffortLevel | None = None
+    tester_model: str | None = None
+    tester_effort: EffortLevel | None = None
+    reviewer_model: str | None = None
+    reviewer_effort: EffortLevel | None = None
 
     # Verification gate
     verification_ruff_target: str = "orchestrator"
 
     # GitHub issue intake
-    issue_source: Literal["gh", "file", "project"] = "gh"
+    issue_source: Literal["gh", "file", "project", "jira"] = "gh"
     issue_file_path: Path | None = None
     github_repo: str | None = None
     # "gh" uses the GitHub CLI; "rest" calls the GitHub API directly (no CLI).
@@ -78,6 +79,23 @@ class Settings(BaseSettings):
     project_owner_type: Literal["user", "org"] = "user"
     # Falls back to github_token when not set.
     project_token: SecretStr | None = None
+
+    # Jira Cloud. With issue_source="jira" the issues of jira_project that sit in
+    # jira_trigger_status are picked up (or those matching jira_jql). Their Jira
+    # status follows the pipeline and progress is commented on the Jira issue.
+    jira_base_url: str | None = None  # https://your-site.atlassian.net
+    jira_email: str | None = None
+    jira_api_token: SecretStr | None = None
+    jira_project: str | None = None  # project key, e.g. "PROJ"
+    jira_trigger_status: str = "To Do"
+    jira_jql: str | None = None  # overrides jira_project and jira_trigger_status
+    # Overrides of the default board-column -> Jira status map, for example
+    # "Building=In Progress,PR open=In Review,Failed=Blocked". "-" means no move.
+    jira_status_map: str | None = None
+
+    # Work out which tasks depend on each other (Jira only): a task that needs
+    # another's code waits until that task's pull request is merged.
+    plan_dependencies: bool = True
 
     # Live intake: poll for new issues and run the pipeline automatically.
     # 0 disables polling.

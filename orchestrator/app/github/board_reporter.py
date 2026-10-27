@@ -1,28 +1,25 @@
 # Moves a task's card across the GitHub Projects board as its stages progress.
 # Failures are logged and swallowed, so a GitHub outage never fails an agent run.
 import logging
-import re
 import time
 from collections.abc import Callable
+from typing import Protocol
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from orchestrator.app.core.config import Settings
 from orchestrator.app.core.exceptions import OrchestratorError
 from orchestrator.app.db.models import Task
 from orchestrator.app.github.client import GitHubApi, detect_github_repo
+from orchestrator.app.github.merged import sync_merged_tasks
 from orchestrator.app.github.projects import (
-    DONE,
-    PR_OPEN,
     ProjectsApi,
     board_numbers,
     make_projects_apis,
 )
+from orchestrator.app.jira.tracker import make_jira_tracker
 
 logger = logging.getLogger(__name__)
-
-_PULL_NUMBER = re.compile(r"/pull/(\d+)")
 
 
 class BoardMover:
@@ -91,36 +88,28 @@ class BoardMover:
 
     def sync_merged(self, session: Session) -> list[int]:
         """Move cards to Done once their pull request has been merged."""
-        if self.pulls is None:
-            return []
+        return sync_merged_tasks(session, self.pulls, self.move, jira=False)
 
-        done: list[int] = []
-        waiting = session.scalars(
-            select(Task).where(
-                Task.board_column == PR_OPEN, Task.pull_request_url.is_not(None)
-            )
-        )
-
-        for task in waiting:
-            match = _PULL_NUMBER.search(task.pull_request_url or "")
-
-            if match is None:
-                continue
-
-            try:
-                pull = self.pulls.request("GET", f"/pulls/{match[1]}")
-            except OrchestratorError as exc:
-                logger.warning("Could not read pull request: %s", exc)
-                continue
-
-            if isinstance(pull, dict) and pull.get("merged") and self.move(task, DONE):
-                done.append(task.id)
-
-        return done
+    def link_blocks(self, blocked: Task, blocker: Task) -> bool:
+        """GitHub boards have no dependency links; nothing to record."""
+        return False
 
 
-def make_board(settings: Settings) -> BoardMover | None:
-    """Create the card mover, or None when no board is configured."""
+class TaskBoard(Protocol):
+    """What the pipeline and poller need from a board or tracker."""
+
+    def move(self, task: Task, column: str) -> bool: ...
+
+    def sync_merged(self, session: Session) -> list[int]: ...
+
+    def link_blocks(self, blocked: Task, blocker: Task) -> bool: ...
+
+
+def make_board(settings: Settings) -> TaskBoard | None:
+    """Create the card mover (or Jira tracker), or None when none is configured."""
+    if settings.issue_source == "jira":
+        return make_jira_tracker(settings)
+
     try:
         explicit = bool(board_numbers(settings))
     except OrchestratorError:

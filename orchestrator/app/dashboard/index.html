@@ -150,7 +150,7 @@
   .st-running .icon, .st-starting .icon, .st-verifying .icon { color: var(--accent); }
   .st-paused .icon { color: var(--warning); }
   .st-failed .icon, .st-rejected .icon { color: var(--critical); }
-  .st-cancelled .icon, .st-skipped .icon, .st-pending .icon, .st-queued .icon { color: var(--ink-3); }
+  .st-cancelled .icon, .st-skipped .icon, .st-pending .icon, .st-queued .icon, .st-blocked .icon { color: var(--ink-3); }
   .spin { animation: spin 1.2s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
@@ -223,6 +223,7 @@
       <option value="all">All tasks</option>
       <option value="active">Active (running, paused, verifying)</option>
       <option value="queued">Queued</option>
+      <option value="blocked">Waiting for other tasks</option>
       <option value="completed">Completed</option>
       <option value="failed">Failed or cancelled</option>
     </select>
@@ -248,7 +249,7 @@ const STATE_TEXT = {
   skipped: ["–", "Skipped"], pending: ["○", "Pending"],
 };
 const STATUS_TEXT = {
-  queued: ["○", "Queued"], starting: ["◐", "Starting"], running: ["◐", "Running"],
+  blocked: ["⏸", "Waiting"], queued: ["○", "Queued"], starting: ["◐", "Starting"], running: ["◐", "Running"],
   verifying: ["◐", "Verifying"], paused: ["⏸", "Paused"], completed: ["✓", "Completed"],
   failed: ["✕", "Failed"], cancelled: ["⊘", "Cancelled"],
 };
@@ -537,6 +538,12 @@ function renderCard(task) {
       task.milestone ? el("span", { class: "chip", title: "GitHub milestone", text: task.milestone }) : null,
       task.project ? el("span", { class: "chip", title: "Project (GitHub Projects board)", text: task.project }) : null,
       task.board_column ? el("span", { class: "chip", title: "GitHub Projects board column", text: "Board: " + task.board_column }) : null,
+      task.blocked_by && task.blocked_by.length
+        ? el("span", { class: "chip", title: "Starts after these are merged", text: "Waiting for " + task.blocked_by.join(", ") })
+        : null,
+      task.jira_key
+        ? el("span", { class: "meta" }, task.jira_url ? link(task.jira_url, task.jira_key) : task.jira_key)
+        : null,
       task.github_issue_number
         ? el("span", { class: "meta" }, task.issue_url ? link(task.issue_url, `issue #${task.github_issue_number}`) : `issue #${task.github_issue_number}`)
         : null,
@@ -557,6 +564,7 @@ function matchesFilter(task, filter) {
   if (filter === "all") return true;
   if (filter === "active") return ACTIVE.has(s);
   if (filter === "queued") return s === "queued";
+  if (filter === "blocked") return s === "blocked";
   if (filter === "completed") return s === "completed";
   return s === "failed" || s === "cancelled";
 }

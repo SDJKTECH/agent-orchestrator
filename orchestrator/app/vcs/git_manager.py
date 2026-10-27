@@ -119,13 +119,18 @@ def create_worktree(
         raise RepositoryError(f"Branch already exists: {branch_name}")
 
     _run_git(repository, "check-ref-format", "--branch", branch_name)
-    _run_git(repository, "rev-parse", "--verify", f"refs/heads/{base_branch}")
+    try:
+        _run_git(repository, "rev-parse", "--verify", f"refs/heads/{base_branch}")
+    except RepositoryError:
+        # A remote branch such as origin/main is a valid base too.
+        _run_git(repository, "rev-parse", "--verify", f"refs/remotes/{base_branch}")
 
     try:
         _run_git(
             repository,
             "worktree",
             "add",
+            "--no-track",
             "-b",
             branch_name,
             str(worktree_path),
@@ -188,6 +193,7 @@ def remove_worktree(
     task_id: str,
     *,
     delete_branch: bool = False,
+    force_branch: bool = False,
 ) -> None:
     """Remove a managed worktree, optionally deleting its task branch."""
     repository = validate_repository(repository_path)
@@ -240,9 +246,17 @@ def remove_worktree(
         _run_git(
             repository,
             "branch",
-            "-d",
+            "-D" if force_branch else "-d",
             expected_branch,
         )
+
+
+def fetch_remote(repository_path: Path, remote: str = "origin") -> None:
+    """Update the remote-tracking branches (touches no checked-out branch)."""
+    if not re.fullmatch(r"[A-Za-z0-9._/-]+", remote) or remote.startswith("-"):
+        raise RepositoryError(f"Invalid remote name: {remote}")
+
+    _run_git(repository_path, "fetch", remote, timeout=120)
 
 
 def _identity_args(path: Path) -> list[str]:

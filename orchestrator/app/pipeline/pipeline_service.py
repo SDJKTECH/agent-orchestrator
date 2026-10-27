@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from orchestrator.app.agents.agent_service import AgentService
 from orchestrator.app.agents.process_control import ProcessControl, process_control
 from orchestrator.app.db.models import Task, TaskStatus
-from orchestrator.app.github.board_reporter import BoardMover
+from orchestrator.app.github.board_reporter import TaskBoard
 from orchestrator.app.github.projects import (
     BUILDING,
     CHECKS,
@@ -92,7 +92,7 @@ class PipelineService:
         isolation: StageIsolation | None = None,
         publisher: PullRequestPublisher | None = None,
         max_fix_attempts: int = 0,
-        board: BoardMover | None = None,
+        board: TaskBoard | None = None,
     ) -> None:
         self.db = db
         self.control = control or process_control
@@ -263,6 +263,9 @@ class PipelineService:
             "No additional description provided."
         )
         header = f"Task: {title}\n\nDescription:\n{description}\n\n"
+        # A task that waited for others was cut from the merged origin/main, which
+        # local main may not have caught up with yet.
+        base = "origin/main" if task.blocked_by else "main"
 
         if role == "builder" and problem:
             return (
@@ -273,7 +276,9 @@ class PipelineService:
                 + "Problem report:\n"
                 + problem
                 + "\n\nInspect the current code with `git log`, `git status` and "
-                "`git diff main...HEAD`, then fix the problem with the smallest "
+                "`git diff "
+                + base
+                + "...HEAD`, then fix the problem with the smallest "
                 "change that resolves it. Fix test files too if the report shows "
                 "they fail because of your change. Do not commit or push changes."
             )
@@ -295,7 +300,7 @@ class PipelineService:
                 "uncommitted in this worktree.\n\n"
                 + header
                 + "Inspect it with `git log`, `git status`, `git diff HEAD` and "
-                "`git diff main...HEAD`, then add "
+                "`git diff " + base + "...HEAD`, then add "
                 "or update automated tests covering the new behavior. Modify test "
                 "files only, never application code. Run the test suite and "
                 "report the results. Do not commit or push changes."
@@ -307,7 +312,7 @@ class PipelineService:
             "and/or uncommitted in this worktree.\n\n"
             + header
             + "Review it using `git log`, `git status`, `git diff HEAD` and "
-            "`git diff main...HEAD` (read untracked files directly). Check "
+            "`git diff " + base + "...HEAD` (read untracked files directly). Check "
             "correctness against the task, "
             "test adequacy and code quality. Do not modify any files. End your "
             "reply with exactly one final line: `VERDICT: APPROVE` or "

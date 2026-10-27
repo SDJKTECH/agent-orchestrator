@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Protocol
 
-from orchestrator.app.core.config import Settings
+from orchestrator.app.core.config import Settings, get_settings
 from orchestrator.app.core.exceptions import OrchestratorError
 from orchestrator.app.db.models import Task
 from orchestrator.app.github.client import GitHubApi, detect_github_repo
@@ -28,6 +28,11 @@ def pull_request_body(task: Task) -> str:
 
     if task.github_issue_number:
         lines.extend(["", f"Closes #{task.github_issue_number}"])
+
+    if task.jira_key:
+        base = get_settings().jira_base_url
+        link = f"{base.rstrip('/')}/browse/{task.jira_key}" if base else task.jira_key
+        lines.extend(["", f"Jira: {link}"])
 
     lines.extend(["", "Review the diff before merging; nothing has been merged."])
     return "\n".join(lines)

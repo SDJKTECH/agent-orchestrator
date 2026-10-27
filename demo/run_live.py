@@ -41,6 +41,7 @@ from orchestrator.app.github.projects import (  # noqa: E402
     ProjectsApi,
     discover_boards,
 )
+from orchestrator.app.jira.source import make_jira_source  # noqa: E402
 
 LABEL = "agent-task"
 REQUIRED_AGENTS = ("builder", "tester", "reviewer")
@@ -91,6 +92,12 @@ def preflight(args) -> tuple[str, str, GitHubApi]:
         )
 
     api = GitHubApi(repo, load_token())
+
+    if args.jira:
+        args.project_mode, args.boards = False, []
+        check_jira()
+        return backend, repo, api
+
     # With a project token the run works from the repository's Projects boards,
     # including ones that are linked while it runs. Otherwise it uses the label.
     args.project_mode = not args.labels and has_project_token()
@@ -98,6 +105,16 @@ def preflight(args) -> tuple[str, str, GitHubApi]:
     if not args.project_mode:
         ensure_label(api, backend, repo, args.create_label)
     return backend, repo, api
+
+
+def check_jira() -> None:
+    """Read the Jira queue once, so bad credentials or JQL stop the run early."""
+    try:
+        waiting = make_jira_source(Settings(_env_file=ROOT / ".env")).list_issues()
+    except OrchestratorError as exc:
+        fail(f"cannot read Jira: {exc}")
+
+    say(f"Jira:            {len(waiting)} issue(s) waiting right now")
 
 
 def has_project_token() -> bool:
@@ -277,6 +294,11 @@ def main() -> None:
         help="use the agent-task label instead of the repository's project boards",
     )
     parser.add_argument(
+        "--jira",
+        action="store_true",
+        help="take tasks from Jira (JIRA_* settings in .env) instead of GitHub",
+    )
+    parser.add_argument(
         "--project-number",
         type=int,
         nargs="+",
@@ -303,7 +325,9 @@ def main() -> None:
     read_only_api = backend == "rest" and not github.can_write
 
     say(f"Repository:      {repo}   (GitHub access: {backend})")
-    if args.project_mode:
+    if args.jira:
+        say("Task source:     Jira (issues in the trigger status are picked up)")
+    elif args.project_mode:
         names = ", ".join(f"{board.title} ({board.number})" for board in args.boards)
         say(f"Projects:        {names or 'none linked yet'}")
         say(
@@ -335,7 +359,9 @@ def main() -> None:
     env = {
         **os.environ,
         "REPOSITORY_PATH": str(ROOT),
-        "ISSUE_SOURCE": "project" if args.project_mode else "gh",
+        "ISSUE_SOURCE": (
+            "jira" if args.jira else "project" if args.project_mode else "gh"
+        ),
         **(
             {"PROJECT_NUMBERS": ",".join(map(str, args.project_number))}
             if args.project_mode and args.project_number
@@ -381,7 +407,9 @@ def main() -> None:
         say(f"Dashboard:  {server_api.base_url}/dashboard   <- open this in a browser")
         say(f"API docs:   {server_api.base_url}/docs   (Ctrl+C to stop)")
         say(f"Server log: {log_file}\n")
-        if args.project_mode:
+        if args.jira:
+            say("Move a Jira issue into the trigger status to start an agent run.\n")
+        elif args.project_mode:
             say("Put an issue card in a project's Todo column to start an agent run.\n")
         else:
             say(f"Add the '{LABEL}' label to an issue to start an agent run.\n")
