@@ -58,9 +58,7 @@ def _condition_arg(text: str) -> Condition:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def _filter_rows(
-    rows: list[list[str]], conditions: list[Condition]
-) -> list[list[str]]:
+def _filter_rows(rows: list[list[str]], conditions: list[Condition]) -> list[list[str]]:
     """Keep the header plus the body rows that satisfy all ``conditions``."""
     if not rows:
         return rows
