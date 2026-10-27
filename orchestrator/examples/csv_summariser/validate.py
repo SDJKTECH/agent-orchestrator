@@ -42,6 +42,9 @@ def validate_csv(path: str | Path) -> list[str]:
 
     first_seen_row: dict[tuple[str, ...], int] = {}
     for row_number, row in enumerate(rows[1:], start=2):
+        if not row:
+            continue
+
         if len(row) < width:
             problems.append(
                 f"Row {row_number}: too few fields (expected {width}, got {len(row)})"
@@ -53,9 +56,7 @@ def validate_csv(path: str | Path) -> list[str]:
 
         key = tuple(row)
         if key in first_seen_row:
-            problems.append(
-                f"Row {row_number}: duplicate of row {first_seen_row[key]}"
-            )
+            problems.append(f"Row {row_number}: duplicate of row {first_seen_row[key]}")
         else:
             first_seen_row[key] = row_number
 
