@@ -8,11 +8,15 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from orchestrator.examples.csv_summariser.stats import (
-    ColumnSummary,
-    read_rows,
-    summarise_columns,
+from orchestrator.examples.csv_summariser.formatters import (
+    EXTENSION_FORMATS,
+    FORMATTERS,
+    format_summary,
+    get_formatter,
 )
+from orchestrator.examples.csv_summariser.stats import read_rows, summarise_columns
+
+__all__ = ["build_parser", "format_summary", "main"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,29 +25,17 @@ def build_parser() -> argparse.ArgumentParser:
         description="Print per-column statistics for a CSV file with a header row.",
     )
     parser.add_argument("input", type=Path, help="path to the CSV file")
+    parser.add_argument(
+        "--format",
+        choices=sorted(FORMATTERS),
+        help="report format (default: inferred from the --output extension, else text)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="write the report to this file instead of printing it",
+    )
     return parser
-
-
-def _format_number(value: float | str) -> str:
-    return f"{value:g}" if isinstance(value, float) else str(value)
-
-
-def format_summary(summary: ColumnSummary) -> str:
-    lines = [
-        f"{summary.name or '(unnamed)'} [{summary.type}]",
-        f"  count: {summary.count}",
-        f"  missing: {summary.missing}",
-    ]
-    for label in ("min", "max", "mean", "median"):
-        value = getattr(summary, label)
-        if value is not None:
-            lines.append(f"  {label}: {_format_number(value)}")
-    if summary.distinct is not None:
-        lines.append(f"  distinct: {summary.distinct}")
-    if summary.top_values:
-        top = ", ".join(f"{value!r} ({n})" for value, n in summary.top_values)
-        lines.append(f"  top: {top}")
-    return "\n".join(lines)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -53,8 +45,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (csv.Error, UnicodeDecodeError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    if not summaries:
-        print("No columns found (empty file).")
-    else:
-        print("\n\n".join(format_summary(summary) for summary in summaries))
+    fmt = args.format
+    if fmt is None:
+        suffix = args.output.suffix.lower() if args.output else ""
+        fmt = EXTENSION_FORMATS.get(suffix, "text")
+    report = get_formatter(fmt)(summaries)
+    if args.output is None:
+        print(report)
+        return 0
+    try:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(report + "\n", encoding="utf-8")
+    except OSError as exc:
+        print(f"error: cannot write {args.output}: {exc}", file=sys.stderr)
+        return 1
     return 0
