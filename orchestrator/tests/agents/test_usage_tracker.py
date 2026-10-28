@@ -38,7 +38,13 @@ def test_parse_claude_usage_json() -> None:
 def test_parse_missing_usage_returns_unavailable_metrics() -> None:
     metrics = parse_usage('{"result": "OK"}')
 
-    assert metrics == UsageMetrics()
+    assert metrics == UsageMetrics(result_text="OK")
+
+
+def test_parse_the_final_message_and_turn_count() -> None:
+    metrics = parse_usage('{"result": "All done", "num_turns": 7}')
+
+    assert (metrics.result_text, metrics.num_turns) == ("All done", 7)
 
 
 def test_parse_invalid_json_returns_unavailable_metrics() -> None:

@@ -38,6 +38,7 @@ DEFAULT_STATUS_MAP = {
     FIXING: "In Progress",
     PR_OPEN: "In Review",
     DONE: "Done",
+    FAILED: "To Do",
 }
 
 

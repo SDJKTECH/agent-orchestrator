@@ -22,6 +22,35 @@ class BranchInfo(BaseModel):
     url: str | None = None
 
 
+class DashboardRun(AgentRunUsageResponse):
+    """One agent run as the dashboard lists it; the final message loads on demand."""
+
+    process_id: int | None = None
+    return_code: int | None = None
+    num_turns: int | None = None
+    has_result: bool = False
+
+
+class RunDetail(DashboardRun):
+    """Everything known about a single agent run."""
+
+    task_title: str
+    jira_key: str | None = None
+    result_text: str | None = None
+
+
+class RoleUsage(BaseModel):
+    """What one kind of agent (builder, tester, reviewer) has used so far."""
+
+    role: str
+    runs: int
+    active: int
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    seconds: float
+
+
 class TaskActions(BaseModel):
     start: bool
     pause: bool
@@ -60,7 +89,7 @@ class DashboardTask(BaseModel):
     created_at: datetime
     stages: list[StageInfo]
     branches: list[BranchInfo]
-    runs: list[AgentRunUsageResponse]
+    runs: list[DashboardRun]
     checks: list[DashboardCheck]
     usage: UsageTotals
     actions: TaskActions
@@ -95,6 +124,7 @@ class DashboardSummary(BaseModel):
     active_agents: int
     max_concurrent_agents: int
     usage: UsageTotals
+    roles: list[RoleUsage] = []
     polling_enabled: bool
 
 

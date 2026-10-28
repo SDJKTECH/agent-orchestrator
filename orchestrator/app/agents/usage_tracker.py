@@ -13,6 +13,8 @@ class UsageMetrics:
     reported_cost_usd: float | None = None
     session_id: str | None = None
     model: str | None = None
+    result_text: str | None = None
+    num_turns: int | None = None
 
 
 def parse_usage(stdout: str) -> UsageMetrics:
@@ -48,6 +50,8 @@ def parse_usage(stdout: str) -> UsageMetrics:
         reported_cost_usd=_non_negative_number(payload.get("total_cost_usd")),
         session_id=_non_empty_string(payload.get("session_id")),
         model=_non_empty_string(model),
+        result_text=_non_empty_string(payload.get("result")),
+        num_turns=_non_negative_int(payload.get("num_turns")),
     )
 
 

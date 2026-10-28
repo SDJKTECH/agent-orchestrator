@@ -133,6 +133,7 @@ class IntakePoller:
                     self.repository_path,
                     self.settings.git_remote,
                     self.settings.base_branch,
+                    jira_only=self.settings.issue_source == "jira",
                 ):
                     self.board.move(task, QUEUED)
 
@@ -161,7 +162,12 @@ class IntakePoller:
 
         try:
             batch = {
-                task.id: task for task in open_tasks(session, str(self.repository_path))
+                task.id: task
+                for task in open_tasks(
+                    session,
+                    str(self.repository_path),
+                    jira_only=self.settings.issue_source == "jira",
+                )
             }
             batch.update({task.id: task for task in imported})
             inferred = (

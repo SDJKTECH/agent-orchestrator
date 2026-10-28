@@ -349,10 +349,58 @@ def test_pipeline_opens_pull_request_from_the_task_branch_when_approved(
     publisher.open_pull_request.assert_called_once_with(task, "agent/task-1")
 
 
-def test_pipeline_skips_pull_request_when_branch_was_not_pushed(pipeline) -> None:
+def test_pipeline_fails_when_approved_work_was_not_pushed(pipeline) -> None:
     from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
 
     isolation = MagicMock()
+    isolation.prepare.side_effect = lambda task, role: StageWorkspace(
+        role, "agent/task-1", Path(task.worktree_path)
+    )
+    isolation.finish.return_value = StageOutcome(committed=True, pushed=False)
+    publisher = MagicMock()
+    service = PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        isolation=isolation,
+        publisher=publisher,
+    )
+
+    task = service.run(1)
+
+    assert task.status == TaskStatus.FAILED
+    assert task.pull_request_url is None
+    publisher.open_pull_request.assert_not_called()
+
+
+def test_pipeline_fails_when_the_pull_request_cannot_be_opened(pipeline) -> None:
+    from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
+
+    isolation = MagicMock()
+    isolation.prepare.side_effect = lambda task, role: StageWorkspace(
+        role, "agent/task-1", Path(task.worktree_path)
+    )
+    isolation.finish.return_value = StageOutcome(committed=True, pushed=True)
+    publisher = MagicMock()
+    publisher.open_pull_request.return_value = None
+    service = PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        isolation=isolation,
+        publisher=publisher,
+    )
+
+    assert service.run(1).status == TaskStatus.FAILED
+
+
+def test_pipeline_completes_without_a_pull_request_when_not_publishing(
+    pipeline,
+) -> None:
+    from orchestrator.app.pipeline.stage_isolation import StageOutcome, StageWorkspace
+
+    isolation = MagicMock()
+    isolation.publish = False
     isolation.prepare.side_effect = lambda task, role: StageWorkspace(
         role, "agent/task-1", Path(task.worktree_path)
     )

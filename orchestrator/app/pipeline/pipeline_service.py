@@ -137,8 +137,10 @@ class PipelineService:
                 problem = outcome.problem
                 continue
 
-            if outcome.status == TaskStatus.COMPLETED:
-                self._open_pull_request(task, chain.branches, chain.pushed)
+            if outcome.status == TaskStatus.COMPLETED and not self._open_pull_request(
+                task, chain.branches, chain.pushed
+            ):
+                return self._finish(task, TaskStatus.FAILED)
 
             return self._finish(task, outcome.status)
 
@@ -226,19 +228,38 @@ class PipelineService:
         task: Task,
         branches: dict[str, str],
         pushed_branches: dict[str, bool],
-    ) -> None:
-        """Open a pull request from the task branch once the reviewer approved."""
+    ) -> bool:
+        """Open a pull request from the task branch once the reviewer approved.
+
+        Returns False when the approved work could not be delivered, because the
+        branch was not pushed or no pull request could be opened: such a task has
+        not finished, and must not look merged.
+        """
         head = branches.get("tester")
 
-        if not self.publisher or not head or not pushed_branches.get("tester"):
-            return
+        if not self.publisher or not head:
+            return True
+
+        if not pushed_branches.get("tester"):
+            if not getattr(self.isolation, "publish", False):
+                return True
+
+            logger.error(
+                "Approved work was not pushed, so there is no pull request: task_id=%s",
+                task.id,
+            )
+            return False
 
         url = self.publisher.open_pull_request(task, head)
 
-        if url:
-            task.pull_request_url = url
-            self.db.commit()
-            logger.info("Pull request opened: task_id=%s url=%s", task.id, url)
+        if not url:
+            logger.error("Could not open the pull request: task_id=%s", task.id)
+            return False
+
+        task.pull_request_url = url
+        self.db.commit()
+        logger.info("Pull request opened: task_id=%s url=%s", task.id, url)
+        return True
 
     def _finish(self, task: Task, status: TaskStatus) -> Task:
         task.status = status

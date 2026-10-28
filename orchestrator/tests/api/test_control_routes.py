@@ -10,6 +10,8 @@ from orchestrator.app.db.models import AgentRun, Task, TaskStatus
 @pytest.fixture
 def control(monkeypatch) -> ProcessControl:
     fresh = ProcessControl()
+    fresh.reported = []
+    monkeypatch.setattr(control_routes, "report_cancelled", fresh.reported.append)
     monkeypatch.setattr(control_routes, "process_control", fresh)
     monkeypatch.setattr(task_routes, "process_control", fresh)
     return fresh
@@ -71,6 +73,27 @@ def test_cancel_marks_task_and_active_runs(
     assert response.status_code == 200
     assert control.is_cancelled(task_id)
     assert task_state(routes_client, task_id) == (TaskStatus.CANCELLED, ["CANCELLED"])
+
+
+def test_cancelling_with_no_live_process_is_shown_on_the_board(
+    routes_client, milestone_id, control
+) -> None:
+    task_id = make_task(routes_client, milestone_id, TaskStatus.RUNNING, "RUNNING")
+
+    routes_client.client.post(f"/tasks/{task_id}/cancel")
+
+    assert [task.id for task in control.reported] == [task_id]
+
+
+def test_cancelling_a_live_process_leaves_the_board_to_the_pipeline(
+    routes_client, milestone_id, control, monkeypatch
+) -> None:
+    task_id = make_task(routes_client, milestone_id, TaskStatus.RUNNING, "RUNNING")
+    monkeypatch.setattr(control, "has_process", lambda _task_id: True)
+
+    routes_client.client.post(f"/tasks/{task_id}/cancel")
+
+    assert control.reported == []
 
 
 def test_cancel_queued_task(routes_client, milestone_id, control) -> None:

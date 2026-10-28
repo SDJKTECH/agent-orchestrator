@@ -1,6 +1,9 @@
 # Git helpers: validate a repo, create and remove worktrees, commit and push.
 # Branch and worktree names are checked, and git is run without a shell.
+import os
 import re
+import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -249,6 +252,49 @@ def remove_worktree(
             "-D" if force_branch else "-d",
             expected_branch,
         )
+
+
+def discard_leftover_worktree(
+    repository_path: Path, worktrees_root: Path, task_id: str
+) -> None:
+    """Clear what a failed `remove_worktree` left behind (Windows file locks).
+
+    Git may forget a worktree yet fail to delete its folder. Such an unregistered
+    folder inside the worktrees root is deleted, stale registrations are pruned and
+    the task branch is dropped, so the worktree can be created again.
+    """
+    repository = validate_repository(repository_path)
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id.strip()):
+        raise RepositoryError(
+            "task_id may contain only letters, numbers, underscores, and hyphens."
+        )
+
+    root = worktrees_root.expanduser().resolve()
+    target = (root / task_id.strip()).resolve()
+
+    if root not in target.parents or target == repository:
+        raise RepositoryError(f"Refusing to clear a folder outside {root}: {target}")
+
+    if any(
+        Path(item.get("path", "")).resolve() == target
+        for item in list_worktrees(repository)
+    ):
+        raise RepositoryError(f"Worktree is still registered: {target}")
+
+    def make_writable(function, path, _error):
+        os.chmod(path, stat.S_IWRITE)
+        function(path)
+
+    if target.exists():
+        shutil.rmtree(target, onerror=make_writable)
+
+    _run_git(repository, "worktree", "prune")
+
+    try:
+        _run_git(repository, "branch", "-D", f"agent/{task_id.strip()}")
+    except RepositoryError:
+        pass  # No such branch.
 
 
 def fetch_remote(repository_path: Path, remote: str = "origin") -> None:

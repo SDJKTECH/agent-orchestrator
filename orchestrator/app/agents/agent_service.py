@@ -26,6 +26,8 @@ from orchestrator.app.verification.service import record_verification_result
 
 logger = logging.getLogger(__name__)
 
+MAX_RESULT_CHARS = 20000
+
 
 def _utc_now() -> datetime:
     """Return the current UTC timestamp."""
@@ -287,7 +289,14 @@ class AgentService:
             if usage.session_id is not None:
                 agent_run.session_id = usage.session_id
 
+            if usage.result_text is not None:
+                agent_run.result_text = usage.result_text[:MAX_RESULT_CHARS]
+
+            if usage.num_turns is not None:
+                agent_run.num_turns = usage.num_turns
+
             agent_run.process_id = result.process_id
+            agent_run.return_code = result.return_code
 
             if self.control.is_cancelled(task.id):
                 agent_run.status = "CANCELLED"

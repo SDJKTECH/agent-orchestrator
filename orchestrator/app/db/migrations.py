@@ -18,6 +18,9 @@ def migrate_usage_columns(engine: Engine) -> None:
         "cache_creation_input_tokens": "INTEGER",
         "cache_read_input_tokens": "INTEGER",
         "reported_cost_usd": "FLOAT",
+        "result_text": "TEXT",
+        "return_code": "INTEGER",
+        "num_turns": "INTEGER",
     }
 
     with engine.begin() as connection:

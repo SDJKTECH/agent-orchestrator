@@ -1,11 +1,14 @@
 # HTTP endpoints to pause, resume and cancel a task, and list active agents.
 # They act on the in-memory process registry of this API process.
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from orchestrator.app.agents.process_control import process_control
 from orchestrator.app.api.schemas import AgentRunUsageResponse, ControlResponse
+from orchestrator.app.core.config import get_settings
 from orchestrator.app.db.database import get_db
 from orchestrator.app.db.models import (
     CANCELLABLE_STATUSES,
@@ -14,10 +17,26 @@ from orchestrator.app.db.models import (
     Task,
     TaskStatus,
 )
+from orchestrator.app.github.board_reporter import make_board
+from orchestrator.app.github.projects import FAILED
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["control"])
 
 ACTIVE_RUN_STATUSES = ("STARTING", "RUNNING", "PAUSED")
+
+
+def report_cancelled(task: Task) -> None:
+    """Show a cancelled task on its board or Jira issue; never fails the cancel."""
+    try:
+        board = make_board(get_settings())
+
+        if board is not None:
+            board.move(task, FAILED)
+    except Exception:
+        logger.warning(
+            "Could not show the cancel on the board: task_id=%s", task.id, exc_info=True
+        )
 
 
 def _get_task_or_404(session: Session, task_id: int) -> Task:
@@ -96,6 +115,8 @@ def cancel_task_endpoint(
     task = _get_task_or_404(session, task_id)
     _require_status(task, CANCELLABLE_STATUSES, "cancel")
 
+    # A live pipeline reports the cancel itself; with none left, report it here.
+    orphaned = not process_control.has_process(task_id)
     process_control.cancel(task_id)
     task.status = TaskStatus.CANCELLED
 
@@ -103,6 +124,10 @@ def cancel_task_endpoint(
         run.status = "CANCELLED"
 
     session.commit()
+
+    if orphaned:
+        report_cancelled(task)
+
     return ControlResponse(
         task_id=task_id, status=task.status, message="Task cancelled."
     )

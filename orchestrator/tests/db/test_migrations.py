@@ -42,6 +42,19 @@ def test_migrate_usage_columns_adds_missing_columns(tmp_path):
     engine.dispose()
 
 
+def test_migrate_usage_columns_adds_the_run_result_columns(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'runs.db'}")
+
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE agent_runs (id INTEGER PRIMARY KEY)"))
+
+    migrate_usage_columns(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("agent_runs")}
+    assert {"result_text", "return_code", "num_turns"} <= columns
+    engine.dispose()
+
+
 def test_migrate_task_columns_adds_current_stage(tmp_path):
     from orchestrator.app.db.migrations import migrate_task_columns
 

@@ -6,6 +6,7 @@ import pytest
 from orchestrator.app.core.exceptions import RepositoryError
 from orchestrator.app.vcs.git_manager import (
     create_worktree,
+    discard_leftover_worktree,
     list_worktrees,
     remove_worktree,
     validate_repository,
@@ -246,3 +247,49 @@ def test_remove_worktree_removes_registered_task_worktree(
         item.get("branch") == "agent/task-remove" for item in list_worktrees(repository)
     )
     assert repository.exists()
+
+
+def test_discard_leftover_worktree_clears_a_folder_git_no_longer_knows(
+    tmp_path: Path,
+) -> None:
+    from orchestrator.tests.helpers import init_repository
+
+    repo = tmp_path / "repo"
+    init_repository(repo)
+    root = tmp_path / "wt"
+    worktree = create_worktree(repo, root, "task-9")
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "remove", "--force", str(worktree)],
+        check=True,
+        capture_output=True,
+    )
+    leftover = root / "task-9"
+    leftover.mkdir()
+    (leftover / "stuck.txt").write_text("x", encoding="utf-8")
+
+    discard_leftover_worktree(repo, root, "task-9")
+
+    assert not leftover.exists()
+    branches = subprocess.run(
+        ["git", "-C", str(repo), "branch", "--list", "agent/task-9"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert branches.strip() == ""
+    assert create_worktree(repo, root, "task-9").is_dir()
+
+
+def test_discard_leftover_worktree_refuses_a_registered_worktree(
+    tmp_path: Path,
+) -> None:
+    from orchestrator.tests.helpers import init_repository
+
+    repo = tmp_path / "repo"
+    init_repository(repo)
+    root = tmp_path / "wt"
+    worktree = create_worktree(repo, root, "task-9")
+
+    with pytest.raises(RepositoryError, match="still registered"):
+        discard_leftover_worktree(repo, root, "task-9")
+
+    assert worktree.is_dir()

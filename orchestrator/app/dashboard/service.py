@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session, selectinload
 
-from orchestrator.app.api.schemas import AgentRunUsageResponse
 from orchestrator.app.core.config import get_settings
 from orchestrator.app.dashboard.schemas import (
     BranchInfo,
@@ -13,8 +12,11 @@ from orchestrator.app.dashboard.schemas import (
     DashboardMilestone,
     DashboardOverview,
     DashboardProject,
+    DashboardRun,
     DashboardSummary,
     DashboardTask,
+    RoleUsage,
+    RunDetail,
     StageInfo,
     TaskActions,
     UsageTotals,
@@ -51,6 +53,58 @@ _RUN_STATE = {
     "FAILED": "failed",
     "CANCELLED": "cancelled",
 }
+
+
+def _run_view(run: AgentRun) -> DashboardRun:
+    view = DashboardRun.model_validate(run)
+    return view.model_copy(update={"has_result": bool(run.result_text)})
+
+
+def run_detail(session: Session, run_id: int) -> RunDetail | None:
+    """One run with the agent's final message, or None when it does not exist."""
+    run = session.get(AgentRun, run_id)
+
+    if run is None:
+        return None
+
+    task = run.task
+    fields = _run_view(run).model_dump()
+    return RunDetail(
+        **fields,
+        task_title=task.title,
+        jira_key=task.jira_key,
+        result_text=run.result_text,
+    )
+
+
+def _seconds(run: AgentRun) -> float:
+    if run.started_at is None or run.finished_at is None:
+        return 0.0
+    return max((run.finished_at - run.started_at).total_seconds(), 0.0)
+
+
+def _role_usage(runs: list[AgentRun]) -> list[RoleUsage]:
+    """Runs, tokens, cost and time per agent role, builder first."""
+    roles = []
+
+    for role in AGENT_ROLES:
+        role_runs = [run for run in runs if run.agent_role == role]
+
+        if role_runs:
+            totals = _usage(role_runs)
+            roles.append(
+                RoleUsage(
+                    role=role,
+                    runs=len(role_runs),
+                    active=sum(run.status in ACTIVE_RUN_STATUSES for run in role_runs),
+                    input_tokens=totals.input_tokens,
+                    output_tokens=totals.output_tokens,
+                    cost_usd=totals.cost_usd,
+                    seconds=sum(_seconds(run) for run in role_runs),
+                )
+            )
+
+    return roles
 
 
 def _agent_stage(task: Task, role: str, runs: list[AgentRun]) -> StageInfo:
@@ -209,7 +263,7 @@ def _task_view(task: Task, repo: str | None) -> DashboardTask:
         created_at=task.created_at,
         stages=stages,
         branches=_branches(task, runs, repo),
-        runs=[AgentRunUsageResponse.model_validate(run) for run in runs],
+        runs=[_run_view(run) for run in runs],
         checks=checks,
         usage=_usage(runs),
         actions=TaskActions(
@@ -334,6 +388,7 @@ def build_overview(
             active_agents=active_agents,
             max_concurrent_agents=max_concurrent_agents,
             usage=_usage(all_runs),
+            roles=_role_usage(all_runs),
             polling_enabled=polling_enabled,
         ),
         milestones=milestones,
