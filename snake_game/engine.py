@@ -7,6 +7,22 @@ from enum import Enum
 
 Cell = tuple[int, int]
 
+POINTS_PER_LEVEL = 5
+BASE_STEPS_PER_SECOND = 8
+SPEED_INCREMENT = 1
+MAX_STEPS_PER_SECOND = 20
+
+
+def level_for_score(score: int) -> int:
+    """Return the level (starting at 1) for a score; +1 every 5 points."""
+    return max(score, 0) // POINTS_PER_LEVEL + 1
+
+
+def speed_for_level(level: int) -> int:
+    """Return steps per second for a level, capped at the maximum speed."""
+    speed = BASE_STEPS_PER_SECOND + (max(level, 1) - 1) * SPEED_INCREMENT
+    return min(speed, MAX_STEPS_PER_SECOND)
+
 
 class Direction(Enum):
     UP = (0, -1)

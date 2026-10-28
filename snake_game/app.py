@@ -8,13 +8,18 @@ from __future__ import annotations
 
 import pygame
 
-from snake_game.engine import Direction, GameState
+from snake_game.engine import (
+    Direction,
+    GameState,
+    level_for_score,
+    speed_for_level,
+)
+from snake_game.highscore import load_high_score, save_high_score
 
 GRID_WIDTH = 20
 GRID_HEIGHT = 20
 CELL_SIZE = 28
 HUD_HEIGHT = 40
-STEPS_PER_SECOND = 10
 
 BACKGROUND = (20, 20, 20)
 GRID_COLOR = (40, 40, 40)
@@ -71,8 +76,13 @@ def _draw_centered(
     screen.blit(surface, surface.get_rect(center=(screen.get_width() // 2, y)))
 
 
-def draw(screen: pygame.Surface, font: pygame.font.Font, state: GameState) -> None:
-    """Draw the grid, snake, food, score and the game-over overlay."""
+def draw(
+    screen: pygame.Surface,
+    font: pygame.font.Font,
+    state: GameState,
+    high_score: int = 0,
+) -> None:
+    """Draw the grid, snake, food, HUD and the game-over overlay."""
     screen.fill(BACKGROUND)
     for x in range(state.width + 1):
         px = x * CELL_SIZE
@@ -96,7 +106,11 @@ def draw(screen: pygame.Surface, font: pygame.font.Font, state: GameState) -> No
     for i, cell in enumerate(state.snake):
         pygame.draw.rect(screen, HEAD_COLOR if i == 0 else SNAKE_COLOR, cell_rect(cell))
 
-    screen.blit(font.render(f"Score: {state.score}", True, TEXT_COLOR), (10, 8))
+    hud = (
+        f"Score: {state.score}   Level: {level_for_score(state.score)}"
+        f"   Best: {max(high_score, state.score)}"
+    )
+    screen.blit(font.render(hud, True, TEXT_COLOR), (10, 8))
 
     if state.game_over:
         mid = screen.get_height() // 2
@@ -116,9 +130,10 @@ def run() -> None:
         font = pygame.font.Font(None, 28)
         clock = pygame.time.Clock()
         step_event = pygame.USEREVENT + 1
-        pygame.time.set_timer(step_event, 1000 // STEPS_PER_SECOND)
-
+        high_score = load_high_score()
         state = new_game()
+        level = level_for_score(state.score)
+        pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
         running = True
         while running:
             for event in pygame.event.get():
@@ -129,7 +144,14 @@ def run() -> None:
                     running = running and not quit_requested
                 elif event.type == step_event:
                     state.step()
-            draw(screen, font, state)
+            if state.game_over and state.score > high_score:
+                high_score = state.score
+                save_high_score(high_score)
+            new_level = level_for_score(state.score)
+            if new_level != level:
+                level = new_level
+                pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
+            draw(screen, font, state, high_score)
             pygame.display.flip()
             clock.tick(60)
     finally:
