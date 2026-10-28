@@ -7,8 +7,9 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import pygame  # noqa: E402
 import pytest  # noqa: E402
+
+pygame = pytest.importorskip("pygame")
 
 from snake_game import app  # noqa: E402
 from snake_game.engine import Direction, GameState  # noqa: E402
