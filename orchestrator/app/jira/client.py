@@ -163,14 +163,17 @@ class JiraApi:
         )
 
     def link_blocks(self, blocker: str, blocked: str) -> None:
-        """Record that `blocker` blocks `blocked` ("is blocked by" on the latter)."""
+        """Record that `blocker` blocks `blocked` ("is blocked by" on the latter).
+
+        In Jira's API the inward issue is the one doing the blocking.
+        """
         self.request(
             "POST",
             "/issueLink",
             {
                 "type": {"name": "Blocks"},
-                "outwardIssue": {"key": blocker},
-                "inwardIssue": {"key": blocked},
+                "inwardIssue": {"key": blocker},
+                "outwardIssue": {"key": blocked},
             },
         )
 

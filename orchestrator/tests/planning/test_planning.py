@@ -21,11 +21,13 @@ from orchestrator.app.planning.dependencies import (
     assign_blockers,
     get_blockers,
     is_merged,
+    open_tasks,
     release_ready,
 )
 from orchestrator.app.planning.planner import (
     Dependency,
     DependencyPlanner,
+    named_dependencies,
     parse_plan,
 )
 from orchestrator.app.services.task_service import create_task
@@ -103,6 +105,52 @@ def test_planner_failures_mean_independent_tasks(tmp_path, session) -> None:
 
     assert DependencyPlanner(settings, FakeRunner(fail=True)).plan(tasks) == {}
     assert DependencyPlanner(settings, FakeRunner("x", code=1)).plan(tasks) == {}
+
+
+def test_a_task_that_names_another_task_depends_on_it(session) -> None:
+    a, b, c = make_tasks(session, "SG-1", "SG-2", "SG-3")
+    a.title, b.title, c.title = (
+        "SG-1: Add the core module",
+        "SG-2: Add a window",
+        "SG-3: Add scores",
+    )
+    b.description = 'Using the "Add the core module" task, build the window.'
+    c.description = (
+        "Extends the 'add a window' task and the \"Add the core module\" task."
+    )
+
+    plan = named_dependencies([a, b, c])
+
+    assert [d.blocker for d in plan["SG-2"]] == ["SG-1"]
+    assert [d.blocker for d in plan["SG-3"]] == ["SG-1", "SG-2"]
+    assert "SG-1" not in plan
+
+
+def test_named_dependencies_still_apply_when_the_planner_says_none(
+    tmp_path, session
+) -> None:
+    a, b = make_tasks(session, "SG-1", "SG-2")
+    a.title, b.title = "SG-1: Add the core module", "SG-2: Add a window"
+    b.description = 'Needs the "Add the core module" task.'
+    settings = Settings(_env_file=None, repository_path=tmp_path)
+
+    for runner in (FakeRunner("{}"), FakeRunner(fail=True), FakeRunner("x", code=1)):
+        plan = DependencyPlanner(settings, runner).plan([a, b])
+
+        assert [d.blocker for d in plan["SG-2"]] == ["SG-1"]
+
+
+def test_a_dependency_found_twice_is_listed_once(tmp_path, session) -> None:
+    a, b = make_tasks(session, "SG-1", "SG-2")
+    a.title, b.title = "SG-1: Add the core module", "SG-2: Add a window"
+    b.description = 'Needs the "Add the core module" task.'
+    runner = FakeRunner('{"SG-2": [{"blocked_by": "SG-1", "reason": "uses it"}]}')
+
+    plan = DependencyPlanner(
+        Settings(_env_file=None, repository_path=tmp_path), runner
+    ).plan([a, b])
+
+    assert plan == {"SG-2": [Dependency("SG-1", "uses it")]}
 
 
 def test_planner_is_not_run_for_a_single_task(tmp_path, session) -> None:
@@ -237,6 +285,60 @@ def test_a_released_task_is_cut_from_the_merged_remote_main(tmp_path, session) -
     assert not (repo / "parser.py").exists()
 
 
+def test_jira_mode_ignores_tasks_that_did_not_come_from_jira(session) -> None:
+    (jira,) = make_tasks(session, "CSV-1")
+    old = Task(
+        milestone=jira.milestone,
+        title="old",
+        status=TaskStatus.COMPLETED,
+        pull_request_url="u",
+        board_column="PR open",
+    )
+    session.add(old)
+    session.commit()
+
+    assert open_tasks(session, "x") == [jira, old]
+    assert open_tasks(session, "x", jira_only=True) == [jira]
+
+
+def test_a_blocker_that_is_not_a_jira_task_does_not_hold_a_jira_task(
+    tmp_path, session
+) -> None:
+    repo = tmp_path / "repo"
+    init_repository(repo)
+    remote = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "clone", "--bare", str(repo), str(remote)],
+        check=True,
+        capture_output=True,
+    )
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "fetch", "origin")
+    project = Project(name="p", local_path=str(repo))
+    milestone = Milestone(project=project, code="GH", title="m")
+    session.add(milestone)
+    session.commit()
+    old = create_task(session, milestone.id, "old", worktrees_root=tmp_path / "wt")
+    old.status, old.pull_request_url, old.board_column = (
+        TaskStatus.COMPLETED,
+        "https://gh/pull/1",
+        "PR open",
+    )
+    waiting = create_task(
+        session, milestone.id, "CSV-8", worktrees_root=tmp_path / "wt", jira_key="CSV-8"
+    )
+    waiting.status = TaskStatus.BLOCKED
+    waiting.blocked_by = json.dumps([{"task_id": old.id, "reason": "r"}])
+    session.commit()
+
+    assert release_ready(session, repo, "origin", "main") == []
+
+    released = release_ready(session, repo, "origin", "main", jira_only=True)
+
+    assert released == [waiting]
+    assert waiting.status == TaskStatus.QUEUED
+
+
 def test_poller_holds_a_dependent_and_runs_the_rest(tmp_path) -> None:
     repository = tmp_path / "source"
     init_repository(repository)
@@ -294,7 +396,7 @@ def test_jira_blocked_by_links_are_read() -> None:
     assert blockers({}) == []
 
 
-def test_creating_a_jira_link_names_the_blocker_as_outward() -> None:
+def test_creating_a_jira_link_names_the_blocker_as_inward() -> None:
     calls = []
     api = JiraApi("https://x.atlassian.net", "me", "t", lambda *a: calls.append(a))
 
@@ -302,5 +404,5 @@ def test_creating_a_jira_link_names_the_blocker_as_outward() -> None:
 
     method, path, body = calls[0]
     assert (method, path) == ("POST", "/issueLink")
-    assert body["outwardIssue"] == {"key": "CSV-1"}
-    assert body["inwardIssue"] == {"key": "CSV-2"}
+    assert body["inwardIssue"] == {"key": "CSV-1"}
+    assert body["outwardIssue"] == {"key": "CSV-2"}

@@ -14,6 +14,7 @@ from orchestrator.app.github.projects import DONE
 from orchestrator.app.planning.planner import Dependency, task_label
 from orchestrator.app.vcs.git_manager import (
     create_worktree,
+    discard_leftover_worktree,
     fetch_remote,
     remove_worktree,
 )
@@ -59,14 +60,21 @@ def is_merged(task: Task) -> bool:
     )
 
 
-def open_tasks(session: Session, local_path: str | None) -> list[Task]:
-    """Tasks still in flight, or finished with their pull request not yet merged."""
+def open_tasks(
+    session: Session, local_path: str | None, jira_only: bool = False
+) -> list[Task]:
+    """Tasks still in flight, or finished with their pull request not yet merged.
+
+    `jira_only` leaves out tasks that did not come from Jira: nothing marks their
+    pull requests merged in Jira mode, so they could never stop blocking.
+    """
     tasks = session.scalars(select(Task).order_by(Task.id)).all()
     return [
         task
         for task in tasks
         if (task.status in OPEN_STATUSES or (task.status == TaskStatus.COMPLETED))
         and not is_merged(task)
+        and (task.jira_key or not jira_only)
         and (
             local_path is None
             or (task.milestone and task.milestone.project.local_path == local_path)
@@ -165,9 +173,15 @@ def describe_blockers(session: Session, task: Task) -> str:
 
 
 def release_ready(
-    session: Session, repository_path: Path, remote: str, base_branch: str
+    session: Session,
+    repository_path: Path,
+    remote: str,
+    base_branch: str,
+    jira_only: bool = False,
 ) -> list[Task]:
     """Queue every BLOCKED task whose blockers are all merged.
+
+    With `jira_only`, a blocker that is not a Jira task is not waited for.
 
     Its placeholder worktree (cut from an older main) is replaced by one cut from
     the up-to-date remote branch, so the task sees the blockers' code.
@@ -180,6 +194,7 @@ def release_ready(
         if all(
             (blocker := session.get(Task, entry["task_id"])) is None
             or is_merged(blocker)
+            or (jira_only and not blocker.jira_key)
             for entry in get_blockers(task)
         )
     ]
@@ -203,9 +218,18 @@ def release_ready(
 
         try:
             if root is not None:
-                remove_worktree(
-                    repository_path, root, name, delete_branch=True, force_branch=True
-                )
+                try:
+                    remove_worktree(
+                        repository_path,
+                        root,
+                        name,
+                        delete_branch=True,
+                        force_branch=True,
+                    )
+                except RepositoryError:
+                    # An earlier attempt may have half-removed it; start clean.
+                    discard_leftover_worktree(repository_path, root, name)
+
                 create_worktree(
                     repository_path, root, name, base_branch=f"{remote}/{base_branch}"
                 )

@@ -142,6 +142,10 @@ class AgentRun(Base):
     cache_read_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reported_cost_usd: Mapped[float | None] = mapped_column(nullable=True)
     estimated_cost: Mapped[float | None] = mapped_column(nullable=True)
+    # What the agent finished with: its final message, exit code and turn count.
+    result_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    return_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    num_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

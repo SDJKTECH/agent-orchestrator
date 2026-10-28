@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -5,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from orchestrator.app.agents.agent_runner import AgentExecutionResult
-from orchestrator.app.agents.agent_service import AgentService
+from orchestrator.app.agents.agent_service import MAX_RESULT_CHARS, AgentService
 from orchestrator.app.core.exceptions import AgentExecutionError
 from orchestrator.app.db.models import AgentRun, Task, TaskStatus
 
@@ -324,6 +325,36 @@ def test_run_task_persists_usage_metrics(setup_agent_service):
     # Preserve the configured model alias.
     assert result.model == "sonnet"
     assert result.status == "COMPLETED"
+
+
+def test_run_task_keeps_the_final_message_exit_code_and_turns(setup_agent_service):
+    context = setup_agent_service
+    context.runner.run.return_value = AgentExecutionResult(
+        return_code=0,
+        stdout='{"result": "Added the parser.", "num_turns": 9}',
+        stderr="",
+        process_id=1,
+    )
+
+    result = context.service.run_task(1)
+
+    assert result.result_text == "Added the parser."
+    assert result.num_turns == 9
+    assert result.return_code == 0
+
+
+def test_run_task_cuts_a_very_long_final_message(setup_agent_service):
+    context = setup_agent_service
+    context.runner.run.return_value = AgentExecutionResult(
+        return_code=0,
+        stdout=json.dumps({"result": "x" * 50000}),
+        stderr="",
+        process_id=1,
+    )
+
+    result = context.service.run_task(1)
+
+    assert len(result.result_text) == MAX_RESULT_CHARS
 
 
 def test_run_task_handles_missing_usage_metrics(setup_agent_service):

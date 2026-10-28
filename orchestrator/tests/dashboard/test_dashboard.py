@@ -385,3 +385,96 @@ def test_fix_attempt_resets_later_stages_on_the_same_branch(
     }
     assert task.stages[0].detail.endswith("attempt 2")
     assert [branch.name for branch in task.branches] == ["agent/task-1"]
+
+
+def test_summary_totals_runs_cost_and_time_per_agent_role(
+    routes_client, seeded
+) -> None:
+    seeded(
+        TaskStatus.RUNNING,
+        runs=[
+            ("builder", "COMPLETED", 5),
+            ("builder", "COMPLETED", 5),
+            ("tester", "RUNNING", 1),
+        ],
+    )
+
+    roles = {role.role: role for role in overview(routes_client).summary.roles}
+
+    assert list(roles) == ["builder", "tester"]
+    assert (roles["builder"].runs, roles["builder"].active) == (2, 0)
+    assert roles["builder"].cost_usd == pytest.approx(1.0)
+    assert roles["builder"].input_tokens == 10
+    assert (roles["tester"].runs, roles["tester"].active) == (1, 1)
+    assert roles["tester"].seconds == 0
+
+
+def test_run_detail_returns_the_final_message_and_how_the_run_ended(
+    routes_client, seeded, monkeypatch
+) -> None:
+    routes_client.app.include_router(dashboard_routes.router)
+    task_id = seeded(TaskStatus.COMPLETED, runs=[("builder", "COMPLETED", 3)])
+
+    with routes_client.session_factory() as session:
+        run = session.query(AgentRun).filter_by(task_id=task_id).one()
+        run.result_text = "Implemented the parser."
+        run.return_code = 0
+        run.num_turns = 12
+        run.session_id = "session-1"
+        run.process_id = 4321
+        session.commit()
+        run_id = run.id
+
+    listed = overview(routes_client).tasks[0].runs[0]
+    detail = routes_client.client.get(f"/dashboard/runs/{run_id}").json()
+
+    assert listed.has_result is True
+    assert (listed.return_code, listed.num_turns, listed.process_id) == (0, 12, 4321)
+    assert detail["result_text"] == "Implemented the parser."
+    assert detail["task_title"] == "Dashboard task"
+    assert detail["session_id"] == "session-1"
+    assert detail["input_tokens"] == 3
+
+
+def test_overview_lists_runs_without_their_message(
+    routes_client, seeded, monkeypatch
+) -> None:
+    routes_client.app.include_router(dashboard_routes.router)
+    seeded(TaskStatus.COMPLETED, runs=[("builder", "COMPLETED", 3)])
+
+    body = routes_client.client.get("/dashboard/overview").json()
+    run = body["tasks"][0]["runs"][0]
+
+    assert run["has_result"] is False
+    assert "result_text" not in run
+
+
+def test_run_detail_of_an_unknown_run_is_not_found(routes_client) -> None:
+    routes_client.app.include_router(dashboard_routes.router)
+
+    assert routes_client.client.get("/dashboard/runs/9999").status_code == 404
+
+
+def test_dashboard_page_has_the_agent_run_views() -> None:
+    source = _dashboard_source()
+
+    for marker in (
+        'id="search"',
+        'id="view-board"',
+        'id="live-panel"',
+        'id="status-panel"',
+        'id="roles-panel"',
+        'id="drawer"',
+        "function openDrawer",
+        "function runDetails",
+        "function renderBoard",
+        "/dashboard/runs/",
+    ):
+        assert marker in source
+
+
+def test_dashboard_reads_zone_less_times_as_utc() -> None:
+    source = _dashboard_source()
+
+    assert "function parseTime(" in source
+    assert "Date.parse(" not in source.replace("return Date.parse(", "")

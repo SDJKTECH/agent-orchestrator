@@ -239,6 +239,31 @@ def test_a_jira_outage_never_raises_and_the_column_is_not_recorded() -> None:
     assert task.board_column is None
 
 
+def test_a_failed_or_cancelled_task_goes_back_to_to_do() -> None:
+    fake = FakeJira(
+        status="In Progress",
+        transitions=[{"id": "21", "name": "Reopen", "to": {"name": "To Do"}}],
+    )
+    task = jira_task(status=TaskStatus.CANCELLED, board_column="Reviewing")
+
+    assert tracker(fake).move(task, FAILED) is True
+
+    assert fake.paths("POST")[0] == "/issue/PROJ-1/transitions"
+    assert fake.calls[-2][2] == {"transition": {"id": "21"}}
+    assert "cancelled" in str(fake.calls[-1][2])
+    assert task.board_column == FAILED
+
+
+def test_failed_can_be_left_in_place_by_the_status_map() -> None:
+    fake = FakeJira(status="In Progress")
+
+    tracker(fake, status_map=parse_status_map("Failed=-")).move(
+        jira_task(status=TaskStatus.FAILED), FAILED
+    )
+
+    assert fake.paths("POST") == ["/issue/PROJ-1/comment"]
+
+
 def test_pickup_and_pr_open_are_commented() -> None:
     fake = FakeJira()
     task = jira_task(
