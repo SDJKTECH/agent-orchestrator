@@ -11,6 +11,7 @@ POINTS_PER_LEVEL = 5
 BASE_STEPS_PER_SECOND = 8
 SPEED_INCREMENT = 1
 MAX_STEPS_PER_SECOND = 20
+MAX_OBSTACLES = 8
 
 
 def level_for_score(score: int) -> int:
@@ -83,6 +84,44 @@ class GameState:
         if count > len(free) - 1:
             raise ValueError("too many obstacles for the grid")
         return set(self._rng.sample(free, count))
+
+    def _cells_in_front_of_head(self) -> set[Cell]:
+        """Return the two cells directly ahead of the head (current/pending heading)."""
+        hx, hy = self.snake[0]
+        cells: set[Cell] = set()
+        for direction in {self.direction, self._pending_direction}:
+            dx, dy = direction.value
+            for distance in (1, 2):
+                x, y = hx + dx * distance, hy + dy * distance
+                if self.wrap:
+                    x, y = x % self.width, y % self.height
+                cells.add((x, y))
+        return cells
+
+    def add_obstacle(self) -> Cell | None:
+        """Place one extra obstacle on a free cell (seeded) and return it.
+
+        The cell avoids the snake, the food, existing obstacles and the two
+        cells in front of the head. Returns None when ``MAX_OBSTACLES`` is
+        reached or no suitable cell exists.
+        """
+        if len(self.obstacles) >= MAX_OBSTACLES:
+            return None
+        blocked = set(self.snake) | self.obstacles | self._cells_in_front_of_head()
+        if self.food is not None:
+            blocked.add(self.food)
+        free = [
+            (x, y)
+            for y in range(self.height)
+            for x in range(self.width)
+            if (x, y) not in blocked
+        ]
+        if not free:
+            return None
+        cell = self._rng.choice(free)
+        self.obstacles.add(cell)
+        self.obstacle_count = len(self.obstacles)
+        return cell
 
     def _place_food(self) -> Cell | None:
         occupied = set(self.snake) | self.obstacles

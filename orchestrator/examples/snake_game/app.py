@@ -158,6 +158,8 @@ def run() -> None:
                 save_high_score(high_score)
             new_level = level_for_score(state.score)
             if new_level != level:
+                if new_level > level and not state.game_over:
+                    state.add_obstacle()
                 level = new_level
                 pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
             draw(screen, font, state, high_score)
