@@ -128,6 +128,43 @@ def draw(
         _draw_centered(screen, font, "Press R to restart or Q to quit", mid + 30)
 
 
+START_KEYS = (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE)
+QUIT_KEYS = (pygame.K_q, pygame.K_ESCAPE)
+
+
+def handle_start_key(key: int) -> str | None:
+    """Interpret a key press on the start screen.
+
+    Returns ``"start"`` for Enter/Space, ``"quit"`` for Q/Esc, else ``None``.
+    """
+    if key in START_KEYS:
+        return "start"
+    if key in QUIT_KEYS:
+        return "quit"
+    return None
+
+
+def draw_start_screen(
+    screen: pygame.Surface, font: pygame.font.Font, high_score: int = 0
+) -> None:
+    """Draw the title, controls and best score shown before the first move."""
+    screen.fill(BACKGROUND)
+    mid = screen.get_height() // 2
+    title_font = pygame.font.Font(None, 72)
+    title = title_font.render("SNAKE", True, HEAD_COLOR)
+    screen.blit(title, title.get_rect(center=(screen.get_width() // 2, mid - 120)))
+    lines = [
+        "Eat the food to grow and score points",
+        "Move: Arrow keys or WASD",
+        "Pause: P",
+        f"Best score: {high_score}",
+        "Press Enter or Space to start",
+        "Press Q or Esc to quit",
+    ]
+    for i, line in enumerate(lines):
+        _draw_centered(screen, font, line, mid - 50 + i * 32)
+
+
 def run() -> None:
     """Open the window and run the game loop until the player quits."""
     pygame.init()
@@ -144,10 +181,19 @@ def run() -> None:
         level = level_for_score(state.score)
         pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
         running = True
+        on_start_screen = True
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif on_start_screen:
+                    if event.type == pygame.KEYDOWN:
+                        action = handle_start_key(event.key)
+                        if action == "quit":
+                            running = False
+                        elif action == "start":
+                            on_start_screen = False
+                            state = new_game()
                 elif event.type == pygame.KEYDOWN:
                     state, quit_requested = handle_key(state, event.key)
                     running = running and not quit_requested
@@ -160,7 +206,10 @@ def run() -> None:
             if new_level != level:
                 level = new_level
                 pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
-            draw(screen, font, state, high_score)
+            if on_start_screen:
+                draw_start_screen(screen, font, high_score)
+            else:
+                draw(screen, font, state, high_score)
             pygame.display.flip()
             clock.tick(60)
     finally:
