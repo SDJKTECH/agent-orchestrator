@@ -26,6 +26,8 @@ GRID_COLOR = (40, 40, 40)
 SNAKE_COLOR = (80, 200, 120)
 HEAD_COLOR = (140, 240, 170)
 FOOD_COLOR = (230, 70, 70)
+BONUS_COLOR = (255, 215, 0)
+BONUS_BLINK_STEPS = 10
 OBSTACLE_COLOR = (130, 130, 150)
 TEXT_COLOR = (240, 240, 240)
 
@@ -109,6 +111,10 @@ def draw(
         pygame.draw.rect(screen, OBSTACLE_COLOR, cell_rect(cell))
     if state.food is not None:
         pygame.draw.rect(screen, FOOD_COLOR, cell_rect(state.food))
+    if state.bonus_food is not None:
+        # Blink when about to expire so the player can see it is running out.
+        if state.bonus_steps_left > BONUS_BLINK_STEPS or state.bonus_steps_left % 2:
+            pygame.draw.rect(screen, BONUS_COLOR, cell_rect(state.bonus_food))
     for i, cell in enumerate(state.snake):
         pygame.draw.rect(screen, HEAD_COLOR if i == 0 else SNAKE_COLOR, cell_rect(cell))
 
@@ -116,6 +122,8 @@ def draw(
         f"Score: {state.score}   Level: {level_for_score(state.score)}"
         f"   Best: {max(high_score, state.score)}"
     )
+    if state.bonus_food is not None:
+        hud += f"   Bonus: {state.bonus_steps_left}"
     screen.blit(font.render(hud, True, TEXT_COLOR), (10, 8))
 
     if state.paused and not state.game_over:
