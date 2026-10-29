@@ -63,6 +63,9 @@ def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
         if key == pygame.K_q:
             return state, True
         return state, False
+    if key == pygame.K_p:
+        state.toggle_pause()
+        return state, False
     direction = key_to_direction(key)
     if direction is not None:
         state.change_direction(direction)
@@ -111,6 +114,9 @@ def draw(
         f"   Best: {max(high_score, state.score)}"
     )
     screen.blit(font.render(hud, True, TEXT_COLOR), (10, 8))
+
+    if state.paused and not state.game_over:
+        _draw_centered(screen, font, "Paused", screen.get_height() // 2)
 
     if state.game_over:
         mid = screen.get_height() // 2
