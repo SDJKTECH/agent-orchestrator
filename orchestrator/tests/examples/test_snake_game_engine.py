@@ -165,3 +165,23 @@ def test_board_full_ends_game():
     assert g.score == 1
     assert g.food is None
     assert g.game_over
+
+
+def test_wrap_pause_and_obstacles_work_together() -> None:
+    state = GameState(5, 5, seed=1, wrap=True, obstacle_count=3)
+    state.obstacles = set()
+    state.snake = [(4, 2), (3, 2), (2, 2)]
+    state.food = (0, 4)
+
+    state.toggle_pause()
+    state.step()
+    assert state.snake[0] == (4, 2)
+
+    state.toggle_pause()
+    state.step()
+    assert state.snake[0] == (0, 2)
+    assert not state.game_over
+
+    state.obstacles = {(1, 2)}
+    state.step()
+    assert state.game_over

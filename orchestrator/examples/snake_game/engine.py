@@ -44,12 +44,14 @@ class GameState:
         width: int = 20,
         height: int = 20,
         seed: int | None = None,
+        wrap: bool = False,
         obstacle_count: int = 0,
     ) -> None:
         if width < 3 or height < 1:
             raise ValueError("grid is too small")
         if obstacle_count < 0:
             raise ValueError("obstacle_count must not be negative")
+        self.wrap = wrap
         self.width = width
         self.height = height
         self._rng = random.Random(seed)
@@ -59,6 +61,7 @@ class GameState:
         self._pending_direction = Direction.RIGHT
         self.score = 0
         self.game_over = False
+        self.paused = False
         self.obstacle_count = obstacle_count
         self.obstacles: set[Cell] = self._place_obstacles(obstacle_count)
         self.food: Cell | None = self._place_food()
@@ -93,20 +96,28 @@ class GameState:
 
     def change_direction(self, direction: Direction) -> None:
         """Turn the snake; a direct reversal is ignored."""
-        if direction == self.direction.opposite:
+        if self.paused or direction == self.direction.opposite:
             return
         self._pending_direction = direction
 
-    def step(self) -> None:
-        """Advance the snake one cell."""
+    def toggle_pause(self) -> None:
+        """Pause or resume the game; has no effect once the game is over."""
         if self.game_over:
+            return
+        self.paused = not self.paused
+
+    def step(self) -> None:
+        """Advance the snake one cell; does nothing while paused."""
+        if self.game_over or self.paused:
             return
         self.direction = self._pending_direction
         dx, dy = self.direction.value
         hx, hy = self.snake[0]
         new_head = (hx + dx, hy + dy)
 
-        if not (0 <= new_head[0] < self.width and 0 <= new_head[1] < self.height):
+        if self.wrap:
+            new_head = (new_head[0] % self.width, new_head[1] % self.height)
+        elif not (0 <= new_head[0] < self.width and 0 <= new_head[1] < self.height):
             self.game_over = True
             return
 
