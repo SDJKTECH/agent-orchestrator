@@ -44,9 +44,12 @@ class GameState:
         width: int = 20,
         height: int = 20,
         seed: int | None = None,
+        obstacle_count: int = 0,
     ) -> None:
         if width < 3 or height < 1:
             raise ValueError("grid is too small")
+        if obstacle_count < 0:
+            raise ValueError("obstacle_count must not be negative")
         self.width = width
         self.height = height
         self._rng = random.Random(seed)
@@ -56,10 +59,30 @@ class GameState:
         self._pending_direction = Direction.RIGHT
         self.score = 0
         self.game_over = False
+        self.obstacle_count = obstacle_count
+        self.obstacles: set[Cell] = self._place_obstacles(obstacle_count)
         self.food: Cell | None = self._place_food()
 
-    def _place_food(self) -> Cell | None:
+    def _place_obstacles(self, count: int) -> set[Cell]:
+        """Pick ``count`` cells (seeded) that avoid the snake's starting cells.
+
+        At least one free cell is always left over so food can be placed.
+        """
+        if count == 0:
+            return set()
         occupied = set(self.snake)
+        free = [
+            (x, y)
+            for y in range(self.height)
+            for x in range(self.width)
+            if (x, y) not in occupied
+        ]
+        if count > len(free) - 1:
+            raise ValueError("too many obstacles for the grid")
+        return set(self._rng.sample(free, count))
+
+    def _place_food(self) -> Cell | None:
+        occupied = set(self.snake) | self.obstacles
         free = [
             (x, y)
             for y in range(self.height)
@@ -84,6 +107,10 @@ class GameState:
         new_head = (hx + dx, hy + dy)
 
         if not (0 <= new_head[0] < self.width and 0 <= new_head[1] < self.height):
+            self.game_over = True
+            return
+
+        if new_head in self.obstacles:
             self.game_over = True
             return
 
