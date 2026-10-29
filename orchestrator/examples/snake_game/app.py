@@ -26,6 +26,7 @@ GRID_COLOR = (40, 40, 40)
 SNAKE_COLOR = (80, 200, 120)
 HEAD_COLOR = (140, 240, 170)
 FOOD_COLOR = (230, 70, 70)
+OBSTACLE_COLOR = (130, 130, 150)
 TEXT_COLOR = (240, 240, 240)
 
 KEY_TO_DIRECTION: dict[int, Direction] = {
@@ -104,6 +105,8 @@ def draw(
             CELL_SIZE - 1,
         )
 
+    for cell in state.obstacles:
+        pygame.draw.rect(screen, OBSTACLE_COLOR, cell_rect(cell))
     if state.food is not None:
         pygame.draw.rect(screen, FOOD_COLOR, cell_rect(state.food))
     for i, cell in enumerate(state.snake):
