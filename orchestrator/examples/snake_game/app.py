@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pygame
 
+from orchestrator.examples.snake_game.countdown import countdown_value
 from orchestrator.examples.snake_game.engine import (
     Direction,
     GameState,
@@ -85,8 +86,9 @@ def draw(
     font: pygame.font.Font,
     state: GameState,
     high_score: int = 0,
+    countdown: int | None = None,
 ) -> None:
-    """Draw the grid, snake, food, HUD and the game-over overlay."""
+    """Draw the grid, snake, food, HUD, countdown and the game-over overlay."""
     screen.fill(BACKGROUND)
     for x in range(state.width + 1):
         px = x * CELL_SIZE
@@ -118,6 +120,15 @@ def draw(
     )
     screen.blit(font.render(hud, True, TEXT_COLOR), (10, 8))
 
+    if countdown is not None:
+        big_font = pygame.font.Font(None, 160)
+        _draw_centered(
+            screen,
+            big_font,
+            str(countdown),
+            HUD_HEIGHT + (screen.get_height() - HUD_HEIGHT) // 2,
+        )
+
     if state.paused and not state.game_over:
         _draw_centered(screen, font, "Paused", screen.get_height() // 2)
 
@@ -144,10 +155,14 @@ def run() -> None:
         level = level_for_score(state.score)
         pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
         running = True
+        start_ticks = pygame.time.get_ticks()
         while running:
+            countdown = countdown_value(pygame.time.get_ticks() - start_ticks)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif countdown is not None:
+                    continue  # ignore input and steps while counting down
                 elif event.type == pygame.KEYDOWN:
                     state, quit_requested = handle_key(state, event.key)
                     running = running and not quit_requested
@@ -160,7 +175,7 @@ def run() -> None:
             if new_level != level:
                 level = new_level
                 pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
-            draw(screen, font, state, high_score)
+            draw(screen, font, state, high_score, countdown)
             pygame.display.flip()
             clock.tick(60)
     finally:
