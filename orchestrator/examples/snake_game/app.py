@@ -46,6 +46,18 @@ def key_to_direction(key: int) -> Direction | None:
     return KEY_TO_DIRECTION.get(key)
 
 
+COUNTDOWN_SECONDS = 3
+COUNTDOWN_STEP_MS = 1000
+
+
+def countdown_value(elapsed_ms: int) -> int | None:
+    """Return the number to show (3, 2, 1) after ``elapsed_ms``, or None when done."""
+    if elapsed_ms < 0:
+        elapsed_ms = 0
+    remaining = COUNTDOWN_SECONDS - elapsed_ms // COUNTDOWN_STEP_MS
+    return remaining if remaining > 0 else None
+
+
 def new_game() -> GameState:
     """Create a fresh game state."""
     return GameState(GRID_WIDTH, GRID_HEIGHT)
@@ -85,6 +97,7 @@ def draw(
     font: pygame.font.Font,
     state: GameState,
     high_score: int = 0,
+    countdown: int | None = None,
 ) -> None:
     """Draw the grid, snake, food, HUD and the game-over overlay."""
     screen.fill(BACKGROUND)
@@ -118,6 +131,11 @@ def draw(
     )
     screen.blit(font.render(hud, True, TEXT_COLOR), (10, 8))
 
+    if countdown is not None:
+        _draw_centered(
+            screen, font, str(countdown), HUD_HEIGHT + state.height * CELL_SIZE // 2
+        )
+
     if state.paused and not state.game_over:
         _draw_centered(screen, font, "Paused", screen.get_height() // 2)
 
@@ -144,10 +162,18 @@ def run() -> None:
         level = level_for_score(state.score)
         pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
         running = True
+        start_ticks = pygame.time.get_ticks()
+        counting_down = True
+        countdown: int | None = None
         while running:
+            if counting_down:
+                countdown = countdown_value(pygame.time.get_ticks() - start_ticks)
+                counting_down = countdown is not None
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif counting_down:
+                    continue  # ignore input and steps until the countdown ends
                 elif event.type == pygame.KEYDOWN:
                     state, quit_requested = handle_key(state, event.key)
                     running = running and not quit_requested
@@ -160,7 +186,7 @@ def run() -> None:
             if new_level != level:
                 level = new_level
                 pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
-            draw(screen, font, state, high_score)
+            draw(screen, font, state, high_score, countdown)
             pygame.display.flip()
             clock.tick(60)
     finally:
