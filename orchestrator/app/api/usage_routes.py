@@ -25,6 +25,7 @@ def get_task_usage_endpoint(
     task_id: int,
     session: Session = Depends(get_db),
 ) -> dict:
+    """Token and cost totals for one task."""
     try:
         return get_task_usage(session, task_id)
     except ValueError as exc:
@@ -42,6 +43,7 @@ def get_task_runs_endpoint(
     task_id: int,
     session: Session = Depends(get_db),
 ) -> list[AgentRun]:
+    """Every agent run of one task with its usage."""
     try:
         get_task_usage(session, task_id)
     except ValueError as exc:
@@ -66,6 +68,7 @@ def get_milestone_usage_endpoint(
     milestone_id: int,
     session: Session = Depends(get_db),
 ) -> dict:
+    """Token and cost totals for one milestone."""
     try:
         return get_milestone_usage(session, milestone_id)
     except ValueError as exc:

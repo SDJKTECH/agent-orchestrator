@@ -24,12 +24,16 @@ def check_strip_env() -> set[str]:
 
 @dataclass(frozen=True)
 class VerificationCheckResult:
+    """The outcome of one check: name, passed, and its output."""
+
     check_name: str
     passed: bool
     details: str
 
 
 class VerificationRunner:
+    """Runs the quality checks in a task's worktree."""
+
     def __init__(
         self,
         runner: ProcessRunner | None = None,
@@ -41,6 +45,7 @@ class VerificationRunner:
         self.ruff_target = ruff_target
 
     def run_checks(self, worktree: Path) -> list[VerificationCheckResult]:
+        """Run pytest, ruff check and ruff format --check; return one result each."""
         checks = [
             ("unit_tests", [sys.executable, "-m", "pytest", "-v"]),
             ("ruff_check", [sys.executable, "-m", "ruff", "check", self.ruff_target]),

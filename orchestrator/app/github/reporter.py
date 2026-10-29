@@ -27,6 +27,7 @@ class GhIssueReporter:
         self.github_repo = github_repo
 
     def comment(self, issue_number: int, body: str) -> bool:
+        """Post a comment on the issue with the `gh` CLI."""
         command = ["gh", "issue", "comment", str(issue_number), "--body", body]
 
         if self.github_repo:
@@ -58,6 +59,7 @@ class RestIssueReporter:
         self.api = api
 
     def comment(self, issue_number: int, body: str) -> bool:
+        """Post a comment on the issue with the GitHub REST API."""
         if not self.api.can_write:
             logger.info("No GitHub token configured; skipping issue comment.")
             return False
@@ -86,6 +88,7 @@ def make_reporter(settings: Settings) -> "GhIssueReporter | RestIssueReporter":
 
 
 def picked_up_message(task: Task) -> str:
+    """The comment posted when the orchestrator starts a task."""
     return (
         f"Agent orchestrator picked up this issue as task {task.id} "
         f"(branch `{task.branch_name}`). Running builder, tester and reviewer."

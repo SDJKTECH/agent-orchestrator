@@ -11,6 +11,8 @@ EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 class Settings(BaseSettings):
+    """All application settings, read from environment variables and the .env file."""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -92,6 +94,13 @@ class Settings(BaseSettings):
     # Overrides of the default board-column -> Jira status map, for example
     # "Building=In Progress,PR open=In Review,Failed=Blocked". "-" means no move.
     jira_status_map: str | None = None
+
+    # Where the agents may put files for a Jira task: its code goes in
+    # <jira_code_root>/<project name>/ and its tests in <jira_tests_root>/.
+    # Anything else they touch sends the task back to the builder. An empty
+    # jira_code_root turns the rule off.
+    jira_code_root: str = "orchestrator/examples"
+    jira_tests_root: str = "orchestrator/tests/examples"
 
     # Work out which tasks depend on each other (Jira only): a task that needs
     # another's code waits until that task's pull request is merged.

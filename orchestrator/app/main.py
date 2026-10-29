@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Start the thread pool and the issue poller on startup; stop them on shutdown."""
     setup_logging()
     create_tables()
     migrate_usage_columns(engine)
@@ -90,6 +91,7 @@ app.include_router(verification_router)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    """Log every HTTP request with its status and duration."""
     request_id = str(uuid4())
     start_time = time.perf_counter()
 
@@ -121,6 +123,7 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/")
 def root() -> dict[str, str]:
+    """Say hello; a quick check that the API is up."""
     return {
         "name": settings.app_name,
         "status": "running",
@@ -130,4 +133,5 @@ def root() -> dict[str, str]:
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
+    """Report that the service is healthy."""
     return {"status": "healthy"}

@@ -99,12 +99,15 @@ class JiraApi:
         self._transport = transport or self._send
 
     def browse_url(self, key: str) -> str:
+        """The web address of an issue, e.g. https://site.atlassian.net/browse/SG-1."""
         return f"{self.base_url}/browse/{key}"
 
     def request(self, method: str, path: str, body: dict | None = None) -> Any:
+        """Send a request to the Jira REST API and return the decoded JSON reply."""
         return self._transport(method, path, body)
 
     def _send(self, method: str, path: str, body: dict | None) -> Any:
+        """Make the HTTP call with basic auth; raise IssueSourceError on failure."""
         headers = {
             "Accept": "application/json",
             "Authorization": f"Basic {self._auth}",
@@ -147,17 +150,20 @@ class JiraApi:
         return issues if isinstance(issues, list) else []
 
     def status_name(self, key: str) -> str | None:
+        """The issue's current status name, or None if it cannot be read."""
         issue = self.request("GET", f"/issue/{key}?fields=status")
         fields = issue.get("fields") if isinstance(issue, dict) else None
         status = fields.get("status") if isinstance(fields, dict) else None
         return status.get("name") if isinstance(status, dict) else None
 
     def transitions(self, key: str) -> list[dict]:
+        """The status changes Jira currently allows for the issue."""
         result = self.request("GET", f"/issue/{key}/transitions")
         items = result.get("transitions") if isinstance(result, dict) else None
         return items if isinstance(items, list) else []
 
     def transition(self, key: str, transition_id: str) -> None:
+        """Move the issue by applying a transition ID."""
         self.request(
             "POST", f"/issue/{key}/transitions", {"transition": {"id": transition_id}}
         )
@@ -178,6 +184,7 @@ class JiraApi:
         )
 
     def comment(self, key: str, text: str) -> None:
+        """Add a plain-text comment to the issue."""
         self.request("POST", f"/issue/{key}/comment", {"body": text_to_adf(text)})
 
 

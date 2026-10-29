@@ -83,6 +83,7 @@ class SubprocessRunner:
         timeout_seconds: int,
         task_id: int | None = None,
     ) -> AgentExecutionResult:
+        """Run the command as a subprocess, stopping it after `timeout_seconds`."""
         if not cwd.is_dir():
             raise AgentExecutionError(f"Agent working directory does not exist: {cwd}")
 

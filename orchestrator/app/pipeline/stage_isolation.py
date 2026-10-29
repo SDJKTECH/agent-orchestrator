@@ -23,6 +23,8 @@ class StageWorkspace:
 
 @dataclass(frozen=True)
 class StageOutcome:
+    """What happened after a stage: whether changes were committed and pushed."""
+
     committed: bool
     pushed: bool
 
@@ -49,6 +51,7 @@ class GitStageIsolation:
         self.remote = remote
 
     def prepare(self, task: Task, role: str) -> StageWorkspace:
+        """Return the task's branch and worktree for the stage's agent."""
         if not task.worktree_path or not task.branch_name:
             raise RepositoryError(
                 f"Task {task.id} does not have an assigned branch and worktree."
@@ -59,6 +62,7 @@ class GitStageIsolation:
         )
 
     def finish(self, workspace: StageWorkspace, message: str) -> StageOutcome:
+        """Commit what the agent changed; push the branch when publishing is on."""
         committed = commit_worktree(workspace.worktree_path, message)
         pushed = False
 

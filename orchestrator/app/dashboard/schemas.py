@@ -9,6 +9,8 @@ from orchestrator.app.db.models import TaskStatus
 
 
 class StageInfo(BaseModel):
+    """State of one pipeline stage (pending, running, done, failed...)."""
+
     name: str
     label: str
     # pending, running, paused, done, failed, rejected, cancelled or skipped
@@ -17,6 +19,8 @@ class StageInfo(BaseModel):
 
 
 class BranchInfo(BaseModel):
+    """The Git branch of a task and where to see it on GitHub."""
+
     role: str
     name: str
     url: str | None = None
@@ -52,6 +56,8 @@ class RoleUsage(BaseModel):
 
 
 class TaskActions(BaseModel):
+    """Which control buttons make sense for a task right now."""
+
     start: bool
     pause: bool
     resume: bool
@@ -59,6 +65,8 @@ class TaskActions(BaseModel):
 
 
 class UsageTotals(BaseModel):
+    """Tokens and cost added up for a task or the whole system."""
+
     input_tokens: int
     output_tokens: int
     cache_creation_input_tokens: int
@@ -67,12 +75,16 @@ class UsageTotals(BaseModel):
 
 
 class DashboardCheck(BaseModel):
+    """Latest result of one verification check."""
+
     check_name: str
     passed: bool
     created_at: datetime
 
 
 class DashboardTask(BaseModel):
+    """Everything the dashboard shows about one task."""
+
     id: int
     title: str
     github_issue_number: int | None
@@ -96,6 +108,8 @@ class DashboardTask(BaseModel):
 
 
 class DashboardMilestone(BaseModel):
+    """A milestone with its task counts and progress."""
+
     id: int
     project: str
     code: str
@@ -120,6 +134,8 @@ class DashboardProject(BaseModel):
 
 
 class DashboardSummary(BaseModel):
+    """The numbers in the dashboard's summary tiles."""
+
     status_counts: dict[str, int]
     active_agents: int
     max_concurrent_agents: int
@@ -129,6 +145,8 @@ class DashboardSummary(BaseModel):
 
 
 class DashboardOverview(BaseModel):
+    """The whole dashboard snapshot returned by GET /dashboard/overview."""
+
     generated_at: datetime
     repo: str | None
     summary: DashboardSummary

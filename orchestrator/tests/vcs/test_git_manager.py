@@ -293,3 +293,27 @@ def test_discard_leftover_worktree_refuses_a_registered_worktree(
         discard_leftover_worktree(repo, root, "task-9")
 
     assert worktree.is_dir()
+
+
+def test_changed_paths_lists_modified_new_and_deleted_files(tmp_path: Path) -> None:
+    from orchestrator.app.vcs.git_manager import changed_paths
+    from orchestrator.tests.helpers import init_repository
+
+    repo = tmp_path / "repo"
+    init_repository(repo)
+    (repo / "keep.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "more"],
+        check=True,
+        capture_output=True,
+    )
+
+    assert changed_paths(repo) == []
+
+    (repo / "README.md").write_text("changed\n", encoding="utf-8")
+    (repo / "keep.txt").unlink()
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "new file.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert changed_paths(repo) == ["README.md", "keep.txt", "pkg/new file.py"]

@@ -44,10 +44,12 @@ class StageResult:
 
     @property
     def succeeded(self) -> bool:
+        """True when the agent ran and exited successfully."""
         return self.agent_run.status == "COMPLETED"
 
     @property
     def cancelled(self) -> bool:
+        """True when the task was cancelled while the agent ran."""
         return self.agent_run.status == "CANCELLED"
 
 

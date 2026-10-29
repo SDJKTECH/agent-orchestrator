@@ -56,6 +56,7 @@ _RUN_STATE = {
 
 
 def _run_view(run: AgentRun) -> DashboardRun:
+    """Turn an agent run row into the dashboard's run model."""
     view = DashboardRun.model_validate(run)
     return view.model_copy(update={"has_result": bool(run.result_text)})
 
@@ -78,6 +79,7 @@ def run_detail(session: Session, run_id: int) -> RunDetail | None:
 
 
 def _seconds(run: AgentRun) -> float:
+    """How long a finished run took, in seconds (0 if unfinished)."""
     if run.started_at is None or run.finished_at is None:
         return 0.0
     return max((run.finished_at - run.started_at).total_seconds(), 0.0)
@@ -108,6 +110,7 @@ def _role_usage(runs: list[AgentRun]) -> list[RoleUsage]:
 
 
 def _agent_stage(task: Task, role: str, runs: list[AgentRun]) -> StageInfo:
+    """State of the builder, tester or reviewer stage, from the task and its runs."""
     role_runs = [run for run in runs if run.agent_role == role]
     label = STAGE_LABELS[role]
 
@@ -141,6 +144,7 @@ def _fix_in_progress(runs: list[AgentRun], latest: AgentRun) -> bool:
 
 
 def _latest_checks(task: Task) -> list[DashboardCheck]:
+    """The newest result of each verification check of the task."""
     latest: dict[str, DashboardCheck] = {}
 
     for result in sorted(task.verification_results, key=lambda item: item.id):
@@ -156,6 +160,7 @@ def _latest_checks(task: Task) -> list[DashboardCheck]:
 def _checks_stage(
     task: Task, checks: list[DashboardCheck], runs: list[AgentRun]
 ) -> StageInfo:
+    """State of the checks stage; stale if the builder ran after the last tester."""
     label = STAGE_LABELS["checks"]
 
     if task.status == TaskStatus.VERIFYING:
@@ -178,6 +183,7 @@ def _checks_stage(
 
 
 def _pull_request_stage(task: Task) -> StageInfo:
+    """State of the pull request stage; done once the task has a PR URL."""
     label = STAGE_LABELS["pull_request"]
 
     if task.pull_request_url:
@@ -190,6 +196,7 @@ def _pull_request_stage(task: Task) -> StageInfo:
 
 
 def _usage(runs: list[AgentRun]) -> UsageTotals:
+    """Add up tokens and cost over the given runs."""
     return UsageTotals(
         input_tokens=sum(run.input_tokens or 0 for run in runs),
         output_tokens=sum(run.output_tokens or 0 for run in runs),
@@ -218,6 +225,7 @@ def _branches(task: Task, runs: list[AgentRun], repo: str | None) -> list[Branch
 
 
 def _task_view(task: Task, repo: str | None) -> DashboardTask:
+    """Build the dashboard model of one task: stages, checks, usage and actions."""
     runs = sorted(task.agent_runs, key=lambda run: run.id)
     checks = _latest_checks(task)
 

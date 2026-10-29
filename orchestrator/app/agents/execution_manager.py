@@ -50,6 +50,7 @@ class ExecutionManager:
             self._release_task(task_id)
 
     def _release_task(self, task_id: int) -> None:
+        """Forget a finished task so it can be scheduled again."""
         with self._lock:
             self._scheduled_task_ids.discard(task_id)
 

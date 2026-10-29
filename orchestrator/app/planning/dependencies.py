@@ -43,6 +43,7 @@ class Edge:
 
 
 def get_blockers(task: Task) -> list[dict]:
+    """The blocker entries stored on a task (empty if none or unreadable)."""
     try:
         entries = json.loads(task.blocked_by or "[]")
     except json.JSONDecodeError:
@@ -83,6 +84,7 @@ def open_tasks(
 
 
 def _reaches(graph: dict[int, set[int]], start: int, target: int) -> bool:
+    """True if `target` can be reached from `start`; used to spot dependency cycles."""
     seen, stack = set(), [start]
 
     while stack:
@@ -162,6 +164,7 @@ def assign_blockers(
 
 
 def describe_blockers(session: Session, task: Task) -> str:
+    """The task's blockers as text, e.g. 'SG-1 (uses its engine)'."""
     parts = []
 
     for entry in get_blockers(task):

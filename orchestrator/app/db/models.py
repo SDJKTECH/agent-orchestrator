@@ -19,10 +19,13 @@ from orchestrator.app.db.database import Base
 
 
 def utc_now() -> datetime:
+    """The current time in UTC, used as a column default."""
     return datetime.now(UTC)
 
 
 class TaskStatus(str, Enum):
+    """Where a task is in its life: queued, blocked, running, completed, failed..."""
+
     QUEUED = "queued"
     BLOCKED = "blocked"
     STARTING = "starting"
@@ -45,6 +48,8 @@ FINISHED_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELL
 
 
 class Project(Base):
+    """A repository the orchestrator works on."""
+
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -62,6 +67,8 @@ class Project(Base):
 
 
 class Milestone(Base):
+    """A group of tasks inside a project."""
+
     __tablename__ = "milestones"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -80,6 +87,8 @@ class Milestone(Base):
 
 
 class Task(Base):
+    """One unit of work, built on its own branch and worktree."""
+
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -124,6 +133,8 @@ class Task(Base):
 
 
 class AgentRun(Base):
+    """One run of a builder, tester or reviewer agent, with its usage and result."""
+
     __tablename__ = "agent_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -157,6 +168,8 @@ class AgentRun(Base):
 
 
 class VerificationResult(Base):
+    """Outcome of one verification check (pytest, ruff) for a task."""
+
     __tablename__ = "verification_results"
 
     id: Mapped[int] = mapped_column(primary_key=True)

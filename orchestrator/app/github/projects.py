@@ -223,9 +223,11 @@ class ProjectsApi:
         return list(self._options)
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Send one GraphQL request to GitHub."""
         return post_graphql(self._token, payload)
 
     def _query(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        """Run a GraphQL query and return its data; raise on GraphQL errors."""
         reply = self._transport({"query": query, "variables": variables})
 
         if reply.get("errors"):
@@ -274,6 +276,7 @@ class ProjectsApi:
         ]
 
     def missing_columns(self) -> list[str]:
+        """Board columns the orchestrator needs that this board lacks."""
         return [name for name in BOARD_COLUMNS if name not in self._options]
 
     def ensure_columns(self) -> None:
@@ -371,6 +374,7 @@ class ProjectsApi:
 
 
 def _parse_card(node: dict[str, Any]) -> BoardCard | None:
+    """Turn a GraphQL project item into a BoardCard, or None if unusable."""
     content = node.get("content") or {}
 
     value = node.get("fieldValueByName") or {}

@@ -39,6 +39,7 @@ class BoardMover:
         self._refreshed_at = float("-inf")
 
     def _reload_boards(self) -> None:
+        """Look the project boards up again, at most every 30 seconds."""
         if self.refresh is None or time.monotonic() - self._refreshed_at < 30:
             return
 
@@ -51,6 +52,7 @@ class BoardMover:
             logger.warning("Could not look up the project boards: %s", exc)
 
     def _board_for(self, task: Task) -> ProjectsApi | None:
+        """The board that holds the task's card, if it can be told."""
         if task.board_number not in self.boards:
             self._reload_boards()
 

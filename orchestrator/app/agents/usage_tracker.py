@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class UsageMetrics:
+    """Tokens, cost, session and final message read from one agent run."""
+
     input_tokens: int | None = None
     output_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
@@ -56,12 +58,14 @@ def parse_usage(stdout: str) -> UsageMetrics:
 
 
 def _non_negative_int(value: object) -> int | None:
+    """The value if it is a non-negative integer, else None."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
     return value
 
 
 def _non_negative_number(value: object) -> float | None:
+    """The value if it is a non-negative number, else None."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     if value < 0:
@@ -70,6 +74,7 @@ def _non_negative_number(value: object) -> float | None:
 
 
 def _non_empty_string(value: object) -> str | None:
+    """The value if it is a non-empty string, else None."""
     if not isinstance(value, str) or not value.strip():
         return None
     return value

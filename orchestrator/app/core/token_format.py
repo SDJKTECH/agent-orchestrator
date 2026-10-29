@@ -7,6 +7,7 @@ _MILLION = 1_000_000
 def _format_scaled(count: int, unit: int, suffix: str) -> str:
     # Truncate (not round) to one decimal using integer math, so values such as
     # 999_999 render as "999.9K" rather than rolling over to "1000.0K".
+    """Format the count divided by `unit`, with the suffix and at most one decimal."""
     tenths = count * 10 // unit
     whole, decimal = divmod(tenths, 10)
     return f"{whole}.{decimal}{suffix}"

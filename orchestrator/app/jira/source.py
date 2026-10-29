@@ -53,6 +53,7 @@ class JiraIssueSource:
         self.limit = limit
 
     def list_issues(self) -> list[Issue]:
+        """Search Jira with the configured JQL; return the matches as Issues."""
         issues: list[Issue] = []
 
         for item in self.api.search(self.jql, self.limit):
@@ -87,4 +88,5 @@ class JiraIssueSource:
 
 
 def make_jira_source(settings: Settings) -> JiraIssueSource:
+    """Build the Jira issue source from the settings."""
     return JiraIssueSource(make_jira_api(settings), build_jql(settings))

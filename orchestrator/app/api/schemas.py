@@ -8,12 +8,16 @@ from orchestrator.app.db.models import TaskStatus
 
 
 class TaskCreate(BaseModel):
+    """Request body to create a task."""
+
     milestone_id: int = Field(gt=0)
     title: str = Field(min_length=1, max_length=250)
     description: str = Field(default="", max_length=10000)
 
 
 class TaskResponse(BaseModel):
+    """A task as returned by the API."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -30,6 +34,8 @@ class TaskResponse(BaseModel):
 
 
 class AgentRunUsageResponse(BaseModel):
+    """Tokens, cost and timing of one agent run."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -50,6 +56,8 @@ class AgentRunUsageResponse(BaseModel):
 
 
 class UsageSummaryResponse(BaseModel):
+    """Tokens and cost added up over several agent runs."""
+
     task_count: int
     run_count: int
     input_tokens: int
@@ -63,6 +71,8 @@ class UsageSummaryResponse(BaseModel):
 
 
 class MilestoneStats(BaseModel):
+    """Task and cost totals of one milestone."""
+
     code: str
     title: str
     task_count: int
@@ -70,6 +80,8 @@ class MilestoneStats(BaseModel):
 
 
 class StatsResponse(BaseModel):
+    """Response of GET /stats: overall totals and per-milestone totals."""
+
     total_tasks: int
     tasks_by_status: dict[str, int]
     total_runs: int
@@ -80,6 +92,8 @@ class StatsResponse(BaseModel):
 
 
 class VerificationResultResponse(BaseModel):
+    """One stored verification check result."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -90,12 +104,16 @@ class VerificationResultResponse(BaseModel):
 
 
 class VerificationCheckSummary(BaseModel):
+    """Pass and fail counts of one kind of check."""
+
     check_name: str
     passed: int
     failed: int
 
 
 class VerificationSummaryResponse(BaseModel):
+    """Response of GET /verification/summary."""
+
     total_results: int
     passed: int
     failed: int
@@ -103,17 +121,23 @@ class VerificationSummaryResponse(BaseModel):
 
 
 class TaskDetailResponse(TaskResponse):
+    """A task together with its verification results."""
+
     agent_runs: list[AgentRunUsageResponse]
     verification_results: list[VerificationResultResponse]
 
 
 class ProjectCreate(BaseModel):
+    """Request body to create a project."""
+
     name: str = Field(min_length=1, max_length=150)
     repository_url: str | None = Field(default=None, max_length=500)
     local_path: str | None = Field(default=None, max_length=1000)
 
 
 class ProjectResponse(BaseModel):
+    """A project as returned by the API."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -124,12 +148,16 @@ class ProjectResponse(BaseModel):
 
 
 class MilestoneCreate(BaseModel):
+    """Request body to create a milestone."""
+
     code: str = Field(min_length=1, max_length=20)
     title: str = Field(min_length=1, max_length=200)
     description: str | None = None
 
 
 class MilestoneResponse(BaseModel):
+    """A milestone as returned by the API."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -141,12 +169,16 @@ class MilestoneResponse(BaseModel):
 
 
 class SyncResponse(BaseModel):
+    """Result of importing issues: imported, skipped and failed."""
+
     imported: list[TaskResponse]
     skipped_issue_numbers: list[int]
     failed: dict[int, str]
 
 
 class ControlResponse(BaseModel):
+    """Result of a pause, resume or cancel request."""
+
     task_id: int
     status: TaskStatus
     message: str

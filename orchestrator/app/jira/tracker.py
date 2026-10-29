@@ -108,6 +108,7 @@ class JiraTracker:
         return True
 
     def _transition(self, key: str, target: str) -> None:
+        """Move the issue to the status named `target`, if Jira offers a way there."""
         wanted = target.casefold()
 
         if (self.api.status_name(key) or "").casefold() == wanted:
@@ -143,6 +144,7 @@ class JiraTracker:
 
     @staticmethod
     def _message(task: Task, column: str) -> str | None:
+        """The comment to post for a column change, or None for no comment."""
         if column == BLOCKED:
             session = Session.object_session(task)
             waiting = describe_blockers(session, task) if session else "other tasks"
@@ -169,10 +171,12 @@ class JiraTracker:
         return None
 
     def sync_merged(self, session: Session) -> list[int]:
+        """Mark tasks whose pull request has merged as Done in Jira."""
         return sync_merged_tasks(session, self.pulls, self.move, jira=True)
 
 
 def make_jira_tracker(settings: Settings) -> JiraTracker:
+    """Build the Jira tracker from the settings."""
     repo = settings.github_repo or detect_github_repo(settings.repository_path)
     token = settings.github_token.get_secret_value() if settings.github_token else None
     return JiraTracker(

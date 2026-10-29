@@ -20,6 +20,7 @@ PAGE = Path(__file__).with_name("index.html")
 
 @lru_cache(maxsize=4)
 def _detected_repo(repository_path: Path | None) -> str | None:
+    """The GitHub repository (owner/name) of the local clone, if it can be found."""
     return detect_github_repo(repository_path)
 
 

@@ -12,6 +12,7 @@ router = APIRouter(tags=["stats"])
 
 
 def _round_cost(value: float) -> float:
+    """Round a cost to a stable number of decimals for display."""
     return round(value, 6)
 
 

@@ -14,10 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 class PullRequestPublisher(Protocol):
+    """Anything that can open a pull request for a task's branch."""
+
     def open_pull_request(self, task: Task, head: str) -> str | None: ...
 
 
 def pull_request_body(task: Task) -> str:
+    """The text of a pull request: what the task was and who built it."""
     lines = [
         "Automated change produced by the agent orchestrator "
         f"(task {task.id}); the reviewer agent approved it.",
@@ -52,6 +55,7 @@ class GhPullRequestPublisher:
         self.base_branch = base_branch
 
     def open_pull_request(self, task: Task, head: str) -> str | None:
+        """Open the PR with the `gh` CLI; return its URL."""
         command = [
             "gh",
             "pr",
@@ -104,6 +108,7 @@ class RestPullRequestPublisher:
         self.base_branch = base_branch
 
     def open_pull_request(self, task: Task, head: str) -> str | None:
+        """Open the PR with the GitHub REST API; return its URL."""
         if not self.api.can_write:
             return (
                 f"https://github.com/{self.api.repo}/compare/"

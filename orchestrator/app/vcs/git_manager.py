@@ -283,6 +283,7 @@ def discard_leftover_worktree(
         raise RepositoryError(f"Worktree is still registered: {target}")
 
     def make_writable(function, path, _error):
+        """Make a read-only file deletable, then retry the delete (OneDrive/Windows)."""
         os.chmod(path, stat.S_IWRITE)
         function(path)
 
@@ -335,6 +336,31 @@ def commit_worktree(worktree_path: Path, message: str) -> bool:
     _run_git(worktree_path, "add", "-A")
     _run_git(worktree_path, *_identity_args(worktree_path), "commit", "-m", message)
     return True
+
+
+def changed_paths(worktree_path: Path) -> list[str]:
+    """Paths changed since the last commit, including new and deleted files.
+
+    Paths are relative to the repository root and use forward slashes.
+    """
+    tracked = _run_git(
+        worktree_path,
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "HEAD",
+    )
+    untracked = _run_git(
+        worktree_path,
+        "-c",
+        "core.quotepath=false",
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+    )
+    return sorted({*tracked.splitlines(), *untracked.splitlines()} - {""})
 
 
 def push_branch(worktree_path: Path, branch: str, remote: str = "origin") -> None:

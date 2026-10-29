@@ -22,7 +22,9 @@ from orchestrator.app.github.projects import (
     TESTING,
 )
 from orchestrator.app.github.publisher import PullRequestPublisher
+from orchestrator.app.pipeline.project_folder import FolderRule, folder_rule
 from orchestrator.app.pipeline.stage_isolation import StageIsolation
+from orchestrator.app.vcs.git_manager import changed_paths
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +95,12 @@ class PipelineService:
         publisher: PullRequestPublisher | None = None,
         max_fix_attempts: int = 0,
         board: TaskBoard | None = None,
+        code_root: str | None = None,
+        tests_root: str | None = None,
     ) -> None:
         self.db = db
+        self.code_root = code_root
+        self.tests_root = tests_root
         self.control = control or process_control
         self.agents = agent_service or AgentService(db=db, control=self.control)
         self.isolation = isolation
@@ -103,6 +109,7 @@ class PipelineService:
         self.board = board
 
     def _move_card(self, task: Task, column: str) -> None:
+        """Move the task's board card, if a board is configured."""
         if self.board is not None:
             self.board.move(task, column)
 
@@ -118,6 +125,7 @@ class PipelineService:
             raise
 
     def _run_stages(self, task: Task) -> Task:
+        """Run builder, tester, checks and reviewer; failures go back to the builder."""
         chain = _Chain()
         problem: str | None = None
 
@@ -149,6 +157,7 @@ class PipelineService:
     def _run_attempt(
         self, task: Task, attempt: int, problem: str | None, chain: _Chain
     ) -> _Attempt:
+        """One pass through every stage; stops at the first failure."""
         for role in PIPELINE_STAGES:
             if not self.control.wait_while_paused(task.id):
                 return _Attempt(status=TaskStatus.CANCELLED)
@@ -161,11 +170,12 @@ class PipelineService:
             )
 
             workspace = self.isolation.prepare(task, role) if self.isolation else None
+            rule = folder_rule(task, self.code_root, self.tests_root)
 
             stage = self.agents.execute_stage(
                 task,
                 role,
-                self._build_prompt(task, role, problem if attempt > 1 else None),
+                self._build_prompt(task, role, problem if attempt > 1 else None, rule),
                 worktree_path=workspace.worktree_path if workspace else None,
             )
 
@@ -186,6 +196,19 @@ class PipelineService:
                     problem=f"The {role} agent did not finish.\n"
                     + _tail(stage.result.stderr or stage.result.stdout)
                 )
+
+            if rule is not None and role in ("builder", "tester"):
+                stray = rule.outside(changed_paths(stage.worktree_path))
+
+                if stray:
+                    logger.warning(
+                        "Stage changed files outside the project folder: "
+                        "task_id=%s stage=%s files=%s",
+                        task.id,
+                        role,
+                        stray,
+                    )
+                    return _Attempt(problem=_stray_problem(role, rule, stray))
 
             if self.isolation and workspace:
                 outcome = self.isolation.finish(
@@ -217,6 +240,7 @@ class PipelineService:
         return _Attempt(status=TaskStatus.COMPLETED)
 
     def _verification_problem(self) -> str:
+        """A message listing the failed checks, to give the builder."""
         failures = self.agents.last_failed_checks
         report = "\n\n".join(
             f"[{name}]\n{_tail(details)}" for name, details in failures
@@ -262,6 +286,7 @@ class PipelineService:
         return True
 
     def _finish(self, task: Task, status: TaskStatus) -> Task:
+        """Save the final status and move the card to its last column."""
         task.status = status
         self.db.commit()
         if status == TaskStatus.COMPLETED:
@@ -278,12 +303,20 @@ class PipelineService:
         return task
 
     @staticmethod
-    def _build_prompt(task: Task, role: str, problem: str | None = None) -> str:
+    def _build_prompt(
+        task: Task,
+        role: str,
+        problem: str | None = None,
+        rule: FolderRule | None = None,
+    ) -> str:
+        """The instructions for an agent: the task, its role and any problem."""
         title = task.title.strip()
         description = (task.description or "").strip() or (
             "No additional description provided."
         )
         header = f"Task: {title}\n\nDescription:\n{description}\n\n"
+        if rule is not None:
+            header += f"Where to put files: {rule.describe()}\n\n"
         # A task that waited for others was cut from the merged origin/main, which
         # local main may not have caught up with yet.
         base = "origin/main" if task.blocked_by else "main"
@@ -339,6 +372,15 @@ class PipelineService:
             "reply with exactly one final line: `VERDICT: APPROVE` or "
             "`VERDICT: REJECT`, followed by a one-sentence reason."
         )
+
+
+def _stray_problem(role: str, rule: FolderRule, stray: list[str]) -> str:
+    """A report of files the agent put where this task is not allowed to."""
+    listed = "\n".join(f"- {path}" for path in stray[:30])
+    return (
+        f"The {role} changed files outside this task's allowed location:\n"
+        f"{listed}\n\n" + rule.describe() + " Move or revert the files listed above."
+    )
 
 
 def _tail(text: str | None) -> str:

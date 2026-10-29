@@ -36,6 +36,7 @@ def create_task_endpoint(
     payload: TaskCreate,
     session: Session = Depends(get_db),
 ) -> Task:
+    """Create a task with its own Git branch and worktree."""
     settings = get_settings()
 
     if settings.repository_path is None:
@@ -85,6 +86,7 @@ def run_task_endpoint(
     request: Request,
     session: Session = Depends(get_db),
 ) -> dict[str, int | str]:
+    """Run one agent on the task and record its usage."""
     task = session.get(Task, task_id)
 
     if task is None:
@@ -146,6 +148,8 @@ def _build_pipeline(session: Session) -> PipelineService:
         publisher=publisher,
         max_fix_attempts=settings.max_fix_attempts,
         board=make_board(settings),
+        code_root=settings.jira_code_root,
+        tests_root=settings.jira_tests_root,
     )
 
 
@@ -216,6 +220,7 @@ def list_tasks_endpoint(
     session: Session = Depends(get_db),
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
 ) -> list[Task]:
+    """List all tasks."""
     query = select(Task).order_by(Task.id)
 
     if task_status is not None:
@@ -229,6 +234,7 @@ def get_task_endpoint(
     task_id: int,
     session: Session = Depends(get_db),
 ) -> Task:
+    """Return one task with its verification results."""
     task = session.get(Task, task_id)
 
     if task is None:

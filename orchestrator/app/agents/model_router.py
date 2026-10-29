@@ -52,6 +52,7 @@ class ModelRouter:
     def _written_in_agent_file(
         self, role: str | None, definition: Path | None
     ) -> dict[str, str]:
+        """The model and effort set in the role's `.md` agent file, if any."""
         if not role:
             return {}
 

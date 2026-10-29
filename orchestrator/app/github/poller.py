@@ -69,6 +69,7 @@ class IntakePoller:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
+        """Start the background polling thread."""
         self._thread = threading.Thread(
             target=self._loop, name="intake-poller", daemon=True
         )
@@ -80,11 +81,13 @@ class IntakePoller:
         )
 
     def stop(self) -> None:
+        """Ask the polling thread to stop and wait for it."""
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=10)
 
     def _loop(self) -> None:
+        """Poll, then wait for the interval, until stopped. A failed poll is logged."""
         while not self._stop.is_set():
             try:
                 self.poll_once()
@@ -182,6 +185,7 @@ class IntakePoller:
             return []
 
     def _schedule(self, task_ids: list[int]) -> list[int]:
+        """Submit each queued task to the thread pool; return the IDs accepted."""
         scheduled: list[int] = []
 
         for task_id in task_ids:
@@ -197,6 +201,7 @@ class IntakePoller:
         return scheduled
 
     def _ensure_milestone(self, session: Session) -> int:
+        """Find or create the project and milestone that imported tasks join."""
         project_name = self.repository_path.name
         project = session.scalar(select(Project).where(Project.name == project_name))
 

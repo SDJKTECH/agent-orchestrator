@@ -53,6 +53,7 @@ def task_label(task: Task) -> str:
 
 
 def build_prompt(tasks: list[Task]) -> str:
+    """The message that asks the planner agent which tasks depend on which."""
     items = "\n\n".join(
         f"[{task_label(task)}] {task.title}\n"
         + (
@@ -174,6 +175,7 @@ class DependencyPlanner:
         self.runner = runner or SubprocessRunner()
 
     def plan(self, tasks: list[Task]) -> dict[str, list[Dependency]]:
+        """Dependencies for a batch of tasks: the agent's answer plus the named ones."""
         if len(tasks) < 2 or self.settings.repository_path is None:
             return {}
 

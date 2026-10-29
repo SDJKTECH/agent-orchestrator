@@ -18,6 +18,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 def _get_project_or_404(session: Session, project_id: int) -> Project:
+    """Load the project, or answer 404 if it does not exist."""
     project = session.get(Project, project_id)
 
     if project is None:
@@ -38,6 +39,7 @@ def create_project_endpoint(
     payload: ProjectCreate,
     session: Session = Depends(get_db),
 ) -> Project:
+    """Create a project."""
     project = Project(
         name=payload.name.strip(),
         repository_url=payload.repository_url,
@@ -60,6 +62,7 @@ def create_project_endpoint(
 
 @router.get("", response_model=list[ProjectResponse])
 def list_projects_endpoint(session: Session = Depends(get_db)) -> list[Project]:
+    """List all projects."""
     return list(session.scalars(select(Project).order_by(Project.id)))
 
 
@@ -73,6 +76,7 @@ def create_milestone_endpoint(
     payload: MilestoneCreate,
     session: Session = Depends(get_db),
 ) -> Milestone:
+    """Create a milestone inside a project."""
     project = _get_project_or_404(session, project_id)
 
     milestone = Milestone(
@@ -95,6 +99,7 @@ def list_milestones_endpoint(
     project_id: int,
     session: Session = Depends(get_db),
 ) -> list[Milestone]:
+    """List the milestones of a project."""
     project = _get_project_or_404(session, project_id)
 
     return list(

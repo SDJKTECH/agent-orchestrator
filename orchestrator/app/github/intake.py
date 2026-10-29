@@ -63,6 +63,7 @@ class IssueSource(Protocol):
 
 
 def _parse_issues(items: object) -> list[Issue]:
+    """Turn a list of raw issue dicts into Issue objects, skipping malformed ones."""
     if not isinstance(items, list):
         raise IssueSourceError("Issue data must be a JSON list.")
 
@@ -121,6 +122,7 @@ class FileIssueSource:
         self.path = path
 
     def list_issues(self) -> list[Issue]:
+        """Read the issues from a JSON file."""
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except OSError as exc:
@@ -149,6 +151,7 @@ class GhCliIssueSource:
         self.label = label
 
     def list_issues(self) -> list[Issue]:
+        """List open labelled issues with the `gh` CLI."""
         command = [
             "gh",
             "issue",
@@ -203,6 +206,7 @@ class RestIssueSource:
         self.limit = limit
 
     def list_issues(self) -> list[Issue]:
+        """List open labelled issues with the GitHub REST API."""
         path = f"/issues?state=open&per_page={self.limit}"
 
         if self.label:
@@ -251,6 +255,7 @@ class ProjectIssueSource:
             return None
 
     def list_issues(self) -> list[Issue]:
+        """List the issues whose cards sit in the board's Todo column."""
         cards = self.api.load()
 
         # A new board only has the default columns; add ours so cards can move.
@@ -297,6 +302,7 @@ class CombinedIssueSource:
         self.sources = sources
 
     def list_issues(self) -> list[Issue]:
+        """List the issues of every board, without duplicates."""
         issues: dict[int, Issue] = {}
 
         for source in self.sources:
@@ -361,6 +367,8 @@ def build_issue_source(settings: Settings) -> IssueSource:
 
 @dataclass
 class SyncResult:
+    """What one import did: tasks created, issues skipped, failures and Jira links."""
+
     imported: list[Task] = field(default_factory=list)
     skipped: list[int | str] = field(default_factory=list)
     failed: dict[int | str, str] = field(default_factory=dict)
@@ -454,6 +462,7 @@ def sync_issues(
     project_id = default.project_id if default else None
 
     def known(column):
+        """Query for the values of `column` already stored for this project."""
         query = (
             select(column)
             .join(Milestone, Task.milestone_id == Milestone.id)

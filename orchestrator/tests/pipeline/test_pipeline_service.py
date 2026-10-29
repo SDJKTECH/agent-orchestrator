@@ -616,3 +616,131 @@ def test_card_moves_to_failed_when_the_task_fails(pipeline) -> None:
     service.run(1)
 
     assert moves == ["Building", "Failed"]
+
+
+def as_jira_task(pipeline, project: str = "Snake Game") -> None:
+    from orchestrator.app.db.models import Milestone, Project
+
+    pipeline.task.jira_key = "SG-1"
+    pipeline.task.milestone = Milestone(project=Project(name=project))
+
+
+def in_folders(pipeline, monkeypatch, *changes: list[str]):
+    """Make each stage report the next list of changed paths."""
+    reported = iter(changes)
+    monkeypatch.setattr(
+        "orchestrator.app.pipeline.pipeline_service.changed_paths",
+        lambda _path: next(reported),
+    )
+
+
+def folder_pipeline(pipeline, attempts: int = 0) -> PipelineService:
+    return PipelineService(
+        db=pipeline.db,
+        agent_service=pipeline.service.agents,
+        control=pipeline.control,
+        max_fix_attempts=attempts,
+        code_root="orchestrator/examples",
+        tests_root="orchestrator/tests/examples",
+    )
+
+
+def test_jira_task_prompts_name_the_project_folder(pipeline, monkeypatch) -> None:
+    as_jira_task(pipeline)
+    in_folders(pipeline, monkeypatch, [], [])
+    prompts: list[str] = []
+    original = pipeline.runner.run.side_effect
+
+    def spy(command, **kwargs):
+        prompts.append(command[-1])
+        return original(command, **kwargs)
+
+    pipeline.runner.run.side_effect = spy
+
+    assert folder_pipeline(pipeline).run(1).status == TaskStatus.COMPLETED
+    assert len(prompts) == 3
+    assert all("orchestrator/examples/snake_game/" in prompt for prompt in prompts)
+
+
+def test_files_inside_the_project_folder_are_accepted(pipeline, monkeypatch) -> None:
+    as_jira_task(pipeline)
+    in_folders(
+        pipeline,
+        monkeypatch,
+        ["orchestrator/examples/snake_game/engine.py"],
+        ["orchestrator/tests/examples/test_snake_game_engine.py"],
+    )
+
+    task = folder_pipeline(pipeline).run(1)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert pipeline.calls == ["builder", "tester", "reviewer"]
+
+
+def test_builder_files_outside_the_folder_fail_the_task(pipeline, monkeypatch) -> None:
+    as_jira_task(pipeline)
+    in_folders(pipeline, monkeypatch, ["snake_game/engine.py"])
+
+    task = folder_pipeline(pipeline).run(1)
+
+    assert task.status == TaskStatus.FAILED
+    assert pipeline.calls == ["builder"]
+
+
+def test_stray_files_are_sent_back_to_the_builder(pipeline, monkeypatch) -> None:
+    as_jira_task(pipeline)
+    in_folders(
+        pipeline,
+        monkeypatch,
+        ["snake_game/engine.py"],
+        ["orchestrator/examples/snake_game/engine.py"],
+        ["orchestrator/tests/examples/test_snake_game_engine.py"],
+    )
+    prompts: list[str] = []
+    original = pipeline.runner.run.side_effect
+
+    def spy(command, **kwargs):
+        prompts.append(command[-1])
+        return original(command, **kwargs)
+
+    pipeline.runner.run.side_effect = spy
+
+    task = folder_pipeline(pipeline, attempts=1).run(1)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert pipeline.calls == ["builder", "builder", "tester", "reviewer"]
+    fix_prompt = next(p for p in prompts if "problem was found" in p)
+    assert "- snake_game/engine.py" in fix_prompt
+
+
+def test_tester_changing_application_code_is_sent_back(pipeline, monkeypatch) -> None:
+    as_jira_task(pipeline)
+    in_folders(
+        pipeline,
+        monkeypatch,
+        ["orchestrator/examples/snake_game/engine.py"],
+        ["orchestrator/app/main.py"],
+        ["orchestrator/examples/snake_game/engine.py"],
+        ["orchestrator/tests/examples/test_snake_game_engine.py"],
+    )
+
+    task = folder_pipeline(pipeline, attempts=1).run(1)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert pipeline.calls == ["builder", "tester", "builder", "tester", "reviewer"]
+
+
+def test_tasks_that_are_not_from_jira_are_not_restricted(pipeline, monkeypatch) -> None:
+    def explode(_path):
+        raise AssertionError("changed_paths must not be called")
+
+    monkeypatch.setattr(
+        "orchestrator.app.pipeline.pipeline_service.changed_paths", explode
+    )
+
+    task = folder_pipeline(pipeline).run(1)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert "Where to put files" not in PipelineService._build_prompt(
+        pipeline.task, "builder"
+    )

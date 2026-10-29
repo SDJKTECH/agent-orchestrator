@@ -40,6 +40,7 @@ def report_cancelled(task: Task) -> None:
 
 
 def _get_task_or_404(session: Session, task_id: int) -> Task:
+    """Load the task, or answer 404 if it does not exist."""
     task = session.get(Task, task_id)
 
     if task is None:
@@ -52,6 +53,7 @@ def _get_task_or_404(session: Session, task_id: int) -> Task:
 
 
 def _require_status(task: Task, allowed: set[TaskStatus], action: str) -> None:
+    """Answer 409 unless the task is in a status that allows the action."""
     if task.status not in allowed:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -60,6 +62,7 @@ def _require_status(task: Task, allowed: set[TaskStatus], action: str) -> None:
 
 
 def _active_runs(session: Session, task_id: int) -> list[AgentRun]:
+    """The task's agent runs that have not finished yet."""
     return list(
         session.scalars(
             select(AgentRun).where(
@@ -75,6 +78,7 @@ def pause_task_endpoint(
     task_id: int,
     session: Session = Depends(get_db),
 ) -> ControlResponse:
+    """Pause a running task by suspending its agent process."""
     task = _get_task_or_404(session, task_id)
     _require_status(task, PAUSABLE_STATUSES, "pause")
 
@@ -93,6 +97,7 @@ def resume_task_endpoint(
     task_id: int,
     session: Session = Depends(get_db),
 ) -> ControlResponse:
+    """Resume a paused task."""
     task = _get_task_or_404(session, task_id)
     _require_status(task, {TaskStatus.PAUSED}, "resume")
 
@@ -112,6 +117,7 @@ def cancel_task_endpoint(
     task_id: int,
     session: Session = Depends(get_db),
 ) -> ControlResponse:
+    """Cancel a task and stop its agent process."""
     task = _get_task_or_404(session, task_id)
     _require_status(task, CANCELLABLE_STATUSES, "cancel")
 
@@ -137,6 +143,7 @@ def cancel_task_endpoint(
 def list_active_agents_endpoint(
     session: Session = Depends(get_db),
 ) -> list[AgentRun]:
+    """List the agent runs that are running right now."""
     return list(
         session.scalars(
             select(AgentRun)

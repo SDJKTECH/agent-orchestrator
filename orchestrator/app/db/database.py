@@ -24,6 +24,8 @@ SessionLocal = sessionmaker(
 
 
 class Base(DeclarativeBase):
+    """Base class of all ORM models."""
+
     pass
 
 

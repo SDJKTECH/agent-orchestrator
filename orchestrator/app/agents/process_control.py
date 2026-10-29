@@ -34,14 +34,17 @@ class ProcessControl:
                 self._suspend_tree(process)
 
     def unregister(self, task_id: int) -> None:
+        """Forget the task's process once it has exited."""
         with self._lock:
             self._processes.pop(task_id, None)
 
     def has_process(self, task_id: int) -> bool:
+        """True while a process is registered for the task."""
         with self._lock:
             return task_id in self._processes
 
     def active_task_ids(self) -> list[int]:
+        """IDs of the tasks that currently have a running process."""
         with self._lock:
             return sorted(self._processes)
 
@@ -54,6 +57,7 @@ class ProcessControl:
                 self._suspend_tree(process)
 
     def resume(self, task_id: int) -> None:
+        """Clear the paused flag and continue the task's suspended process."""
         with self._lock:
             self._paused.discard(task_id)
             process = self._processes.get(task_id)
@@ -70,10 +74,12 @@ class ProcessControl:
                 self._kill_tree(process)
 
     def is_paused(self, task_id: int) -> bool:
+        """True when the task has been asked to pause."""
         with self._lock:
             return task_id in self._paused
 
     def is_cancelled(self, task_id: int) -> bool:
+        """True when the task has been cancelled."""
         with self._lock:
             return task_id in self._cancelled
 
@@ -91,6 +97,7 @@ class ProcessControl:
 
     @staticmethod
     def _tree(process: subprocess.Popen) -> list[psutil.Process]:
+        """The process and all its children (empty if it already exited)."""
         try:
             parent = psutil.Process(process.pid)
             return [parent, *parent.children(recursive=True)]
@@ -98,6 +105,7 @@ class ProcessControl:
             return []
 
     def _suspend_tree(self, process: subprocess.Popen) -> None:
+        """Suspend the process and its children."""
         for item in self._tree(process):
             try:
                 item.suspend()
@@ -105,6 +113,7 @@ class ProcessControl:
                 continue
 
     def _resume_tree(self, process: subprocess.Popen) -> None:
+        """Continue the process and its children."""
         for item in self._tree(process):
             try:
                 item.resume()
@@ -112,6 +121,7 @@ class ProcessControl:
                 continue
 
     def _kill_tree(self, process: subprocess.Popen) -> None:
+        """Kill the process and its children."""
         for item in reversed(self._tree(process)):
             try:
                 item.kill()

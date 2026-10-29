@@ -55,9 +55,11 @@ class GitHubApi:
 
     @property
     def can_write(self) -> bool:
+        """True when a token is set, so writes (comments, PRs) are possible."""
         return self.token is not None
 
     def request(self, method: str, path: str, body: dict | None = None) -> Any:
+        """Send a REST request to GitHub and return the decoded JSON reply."""
         headers = {
             "Accept": "application/vnd.github+json",
             "User-Agent": "agent-orchestrator",

@@ -12,6 +12,7 @@ def record_verification_result(
     passed: bool,
     details: str = "",
 ) -> VerificationResult:
+    """Store one check result for a task in the database."""
     result = VerificationResult(
         task_id=task_id,
         check_name=check_name,
