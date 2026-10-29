@@ -56,6 +56,7 @@ class GameState:
         self._pending_direction = Direction.RIGHT
         self.score = 0
         self.game_over = False
+        self.paused = False
         self.food: Cell | None = self._place_food()
 
     def _place_food(self) -> Cell | None:
@@ -70,13 +71,19 @@ class GameState:
 
     def change_direction(self, direction: Direction) -> None:
         """Turn the snake; a direct reversal is ignored."""
-        if direction == self.direction.opposite:
+        if self.paused or direction == self.direction.opposite:
             return
         self._pending_direction = direction
 
-    def step(self) -> None:
-        """Advance the snake one cell."""
+    def toggle_pause(self) -> None:
+        """Pause or resume the game; has no effect once the game is over."""
         if self.game_over:
+            return
+        self.paused = not self.paused
+
+    def step(self) -> None:
+        """Advance the snake one cell; does nothing while paused."""
+        if self.game_over or self.paused:
             return
         self.direction = self._pending_direction
         dx, dy = self.direction.value
