@@ -44,9 +44,11 @@ class GameState:
         width: int = 20,
         height: int = 20,
         seed: int | None = None,
+        wrap: bool = False,
     ) -> None:
         if width < 3 or height < 1:
             raise ValueError("grid is too small")
+        self.wrap = wrap
         self.width = width
         self.height = height
         self._rng = random.Random(seed)
@@ -83,7 +85,9 @@ class GameState:
         hx, hy = self.snake[0]
         new_head = (hx + dx, hy + dy)
 
-        if not (0 <= new_head[0] < self.width and 0 <= new_head[1] < self.height):
+        if self.wrap:
+            new_head = (new_head[0] % self.width, new_head[1] % self.height)
+        elif not (0 <= new_head[0] < self.width and 0 <= new_head[1] < self.height):
             self.game_over = True
             return
 
