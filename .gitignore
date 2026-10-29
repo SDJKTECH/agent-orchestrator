@@ -29,3 +29,6 @@ logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Snake game local high score
+orchestrator/examples/snake_game/highscore.json
