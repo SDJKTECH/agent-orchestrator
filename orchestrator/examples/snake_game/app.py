@@ -137,6 +137,30 @@ def draw(
         _draw_centered(screen, font, "Press R to restart or Q to quit", mid + 30)
 
 
+START_LINES = (
+    "Move: arrow keys or WASD",
+    "P: pause",
+    "Eat food to grow and score",
+    "Avoid walls, obstacles and yourself",
+)
+
+
+def draw_start_screen(
+    screen: pygame.Surface, font: pygame.font.Font, high_score: int = 0
+) -> None:
+    """Draw the title overlay shown before the first move."""
+    overlay = pygame.Surface(screen.get_size())
+    overlay.fill(BACKGROUND)
+    screen.blit(overlay, (0, 0))
+    mid = screen.get_height() // 2
+    _draw_centered(screen, pygame.font.Font(None, 96), "SNAKE", mid - 110)
+    for i, line in enumerate(START_LINES):
+        _draw_centered(screen, font, line, mid - 40 + i * 28)
+    if high_score:
+        _draw_centered(screen, font, f"Best: {high_score}", mid + 90)
+    _draw_centered(screen, font, "Press any key to start (Q to quit)", mid + 130)
+
+
 def run() -> None:
     """Open the window and run the game loop until the player quits."""
     pygame.init()
@@ -152,13 +176,24 @@ def run() -> None:
         state = new_game()
         level = level_for_score(state.score)
         pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
-        start_ticks = pygame.time.get_ticks()
+        start_ticks: int | None = None  # set when the player starts from the title
         running = True
         while running:
-            countdown = countdown_value((pygame.time.get_ticks() - start_ticks) / 1000)
+            countdown = (
+                None
+                if start_ticks is None
+                else countdown_value((pygame.time.get_ticks() - start_ticks) / 1000)
+            )
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif start_ticks is None:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_q:
+                            running = False
+                        else:
+                            start_ticks = pygame.time.get_ticks()
+                            countdown = countdown_value(0.0)
                 elif countdown is not None:
                     continue  # snake is frozen and input ignored during countdown
                 elif event.type == pygame.KEYDOWN:
@@ -176,6 +211,8 @@ def run() -> None:
                 level = new_level
                 pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
             draw(screen, font, state, high_score, countdown)
+            if start_ticks is None:
+                draw_start_screen(screen, font, high_score)
             pygame.display.flip()
             clock.tick(60)
     finally:
