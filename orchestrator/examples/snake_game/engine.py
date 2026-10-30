@@ -11,6 +11,9 @@ POINTS_PER_LEVEL = 5
 BASE_STEPS_PER_SECOND = 8
 SPEED_INCREMENT = 1
 MAX_STEPS_PER_SECOND = 20
+BONUS_EVERY = 5  # a bonus food appears after every 5th normal food eaten
+BONUS_POINTS = 3
+BONUS_LIFETIME_STEPS = 20
 
 
 def level_for_score(score: int) -> int:
@@ -64,6 +67,9 @@ class GameState:
         self.paused = False
         self.obstacle_count = obstacle_count
         self.obstacles: set[Cell] = self._place_obstacles(obstacle_count)
+        self.bonus_food: Cell | None = None
+        self.bonus_steps_left = 0
+        self.foods_eaten = 0
         self.food: Cell | None = self._place_food()
 
     def _place_obstacles(self, count: int) -> set[Cell]:
@@ -86,6 +92,8 @@ class GameState:
 
     def _place_food(self) -> Cell | None:
         occupied = set(self.snake) | self.obstacles
+        if self.bonus_food is not None:
+            occupied.add(self.bonus_food)
         free = [
             (x, y)
             for y in range(self.height)
@@ -93,6 +101,21 @@ class GameState:
             if (x, y) not in occupied
         ]
         return self._rng.choice(free) if free else None
+
+    def _spawn_bonus(self) -> None:
+        """Place a bonus food on a free cell (not snake, obstacle or food)."""
+        occupied = set(self.snake) | self.obstacles
+        if self.food is not None:
+            occupied.add(self.food)
+        free = [
+            (x, y)
+            for y in range(self.height)
+            for x in range(self.width)
+            if (x, y) not in occupied
+        ]
+        if free:
+            self.bonus_food = self._rng.choice(free)
+            self.bonus_steps_left = BONUS_LIFETIME_STEPS
 
     def change_direction(self, direction: Direction) -> None:
         """Turn the snake; a direct reversal is ignored."""
@@ -125,7 +148,9 @@ class GameState:
             self.game_over = True
             return
 
-        eating = new_head == self.food
+        eating_normal = new_head == self.food
+        eating_bonus = self.bonus_food is not None and new_head == self.bonus_food
+        eating = eating_normal or eating_bonus
         # The tail cell is vacated this step unless the snake grows.
         body = self.snake if eating else self.snake[:-1]
         if new_head in body:
@@ -133,10 +158,22 @@ class GameState:
             return
 
         self.snake.insert(0, new_head)
-        if eating:
+        if not eating:
+            self.snake.pop()
+        if eating_bonus:
+            self.score += BONUS_POINTS
+            self.bonus_food = None
+            self.bonus_steps_left = 0
+        elif self.bonus_food is not None:
+            self.bonus_steps_left -= 1
+            if self.bonus_steps_left <= 0:
+                self.bonus_food = None
+                self.bonus_steps_left = 0
+        if eating_normal:
             self.score += 1
+            self.foods_eaten += 1
             self.food = self._place_food()
             if self.food is None:
                 self.game_over = True  # board full: the player has won
-        else:
-            self.snake.pop()
+            elif self.foods_eaten % BONUS_EVERY == 0 and self.bonus_food is None:
+                self._spawn_bonus()
