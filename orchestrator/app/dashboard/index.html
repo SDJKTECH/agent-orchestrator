@@ -1,6 +1,8 @@
 <!doctype html>
 <!-- Live monitoring dashboard: a single page that polls /dashboard/overview.
-     Shows each task's stages, cost, milestones and the pause/resume/cancel controls. -->
+     Work view: the Jira Epic > Story > Subtask tree with rolled-up progress and cost.
+     Also: what needs a person (PRs to merge, failures), recent activity, per-task stages,
+     cost, milestones and the pause/resume/cancel controls. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -338,6 +340,133 @@
   .desc { white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; max-height: 240px; overflow: auto; }
   .hint { color: var(--ink-3); font-size: 12px; margin: 14px 0 0; }
   [hidden] { display: none !important; }
+  /* ---------- v3: hierarchy (Work view), attention, activity ---------- */
+  :root { --epic: #8a5cd6; --story: #2a78d6; --subtask: #178f80; --attention: #d98a00; }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) { --epic: #b08cf0; --story: #5aa0f0; --subtask: #3fc0ae; --attention: #f0b030; }
+  }
+  :root[data-theme="dark"] { --epic: #b08cf0; --story: #5aa0f0; --subtask: #3fc0ae; --attention: #f0b030; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 15; margin: -16px -16px 16px; padding: 12px 16px;
+    background: color-mix(in srgb, var(--page) 90%, transparent);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+  }
+
+  .attention {
+    border-color: color-mix(in srgb, var(--attention) 60%, var(--ring));
+    background: color-mix(in srgb, var(--attention) 7%, var(--surface));
+  }
+  .attention.calm { border-color: var(--ring); background: var(--surface); }
+  .attention h2 { color: var(--ink); }
+  .att-list { display: grid; gap: 6px; }
+  .att-item {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 7px 10px;
+    border-radius: 8px; background: var(--page); border: 1px solid var(--line);
+  }
+  .att-item .what { flex: 1 1 300px; min-width: 0; overflow-wrap: anywhere; }
+  .att-ico {
+    width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; flex: none;
+    color: #fff; font-size: 12px; font-weight: 700; background: var(--attention);
+  }
+  .att-ico.failed { background: var(--critical); }
+  .att-ico.ok { background: var(--good); }
+  a.btnlink {
+    font: inherit; color: var(--ink); background: var(--surface); text-decoration: none;
+    border: 1px solid var(--accent); border-radius: 6px; padding: 5px 12px; white-space: nowrap;
+  }
+  a.btnlink:hover { background: var(--line); }
+
+  .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+  .crumbs .sep { color: var(--ink-3); }
+  .crumb {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 999px; max-width: 100%;
+    border: 1px solid var(--line-strong); background: var(--page);
+  }
+  .crumb .ct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30ch; }
+  .typeico { font-size: 11px; flex: none; width: 1.1em; text-align: center; }
+  .type-epic .typeico, .typeico.type-epic { color: var(--epic); }
+  .type-story .typeico, .typeico.type-story { color: var(--story); }
+  .type-subtask .typeico, .typeico.type-subtask, .typeico.type-task, .typeico.type-bug { color: var(--subtask); }
+
+  .activity-head { display: flex; align-items: center; gap: 8px; }
+  .activity-head h2 { margin: 0; flex: 1; }
+  .activity-head button { font-size: 12px; padding: 2px 10px; }
+  ol.feed { list-style: none; margin: 8px 0 0; padding: 0; }
+  .act {
+    display: grid; grid-template-columns: 74px 12px 1fr; gap: 8px; align-items: center;
+    padding: 5px 4px; border-top: 1px solid var(--line); font-size: 13px;
+  }
+  .act:first-child { border-top: 0; }
+  .act .ago { color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .act .kind { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3); }
+  .act .kind.started { background: var(--s-work); }
+  .act .kind.finished, .act .kind.checks_ok { background: var(--s-done); }
+  .act .kind.checks_failed, .act .kind.stopped { background: var(--s-fail); }
+  .act .kind.added { background: var(--role-reviewer); }
+  .act button.linklike { all: unset; cursor: pointer; font-weight: 600; margin-right: 6px; }
+  .act button.linklike:hover { text-decoration: underline; }
+  .act button.linklike:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .act.fresh { animation: fresh 2.6s ease-out; }
+  @keyframes fresh { from { background: color-mix(in srgb, var(--accent) 20%, transparent); } to { background: transparent; } }
+  @media (prefers-reduced-motion: reduce) { .act.fresh { animation: none; } }
+
+  .wtree { display: block; }
+  .wrow {
+    display: grid; grid-template-columns: minmax(230px, 2.3fr) minmax(130px, 1.1fr) minmax(170px, 1.5fr) auto;
+    gap: 6px 14px; align-items: center; padding: 9px 12px; margin-bottom: 6px;
+    background: var(--surface); border: 1px solid var(--ring); border-radius: 10px;
+  }
+  .wrow.depth-1 { margin-left: 24px; }
+  .wrow.depth-2 { margin-left: 48px; }
+  .wrow.container { background: color-mix(in srgb, var(--surface) 92%, var(--page)); }
+  .wrow.container.type-epic { border-left: 4px solid var(--epic); }
+  .wrow.container.type-story { border-left: 4px solid var(--story); }
+  .wrow.leaf { border-left: 4px solid var(--lane, var(--line-strong)); }
+  .wrow.leaf.is-running { border-color: color-mix(in srgb, var(--s-work) 55%, var(--ring)); }
+  .wname { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+  .wname .wkey { font-weight: 600; white-space: nowrap; }
+  .wname .wtitle { overflow-wrap: anywhere; }
+  .wname .wtitle, .wname button.linklike { font-weight: 500; }
+  .wname button.linklike { all: unset; cursor: pointer; overflow-wrap: anywhere; font-weight: 500; }
+  .wname button.linklike:hover { text-decoration: underline; }
+  .wname button.linklike:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.twisty {
+    all: unset; cursor: pointer; width: 1.4em; text-align: center; color: var(--ink-2); flex: none;
+  }
+  button.twisty:hover { color: var(--ink); }
+  button.twisty:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .twisty.spacer { display: inline-block; width: 1.4em; flex: none; }
+  .statusbar.thin { height: 8px; border-radius: 4px; }
+  .wstats { font-size: 13px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+  .wstats strong { color: var(--ink); }
+  .wact { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .wgroup-note { color: var(--ink-3); font-size: 12px; margin: 2px 0 10px 4px; }
+  @media (max-width: 860px) {
+    .wrow { grid-template-columns: 1fr; }
+    .wact { justify-content: flex-start; }
+    .wrow.depth-1 { margin-left: 12px; }
+    .wrow.depth-2 { margin-left: 24px; }
+  }
+
+  p.shortcuts { text-align: center; margin: 24px 0 8px; }
+  p.shortcuts kbd { margin: 0 2px; }
+  /* ---------- v3 layout: main view first, insights beside it ---------- */
+  main { max-width: 1440px; }
+  .layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  .primary { min-width: 0; }
+  .side { position: sticky; top: 84px; display: grid; gap: 12px; max-height: calc(100vh - 100px); overflow-y: auto; padding-bottom: 4px; }
+  .side .panel { margin: 0; }
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .side { position: static; max-height: none; overflow: visible; }
+  }
+  /* keep the key and the title on one line; the title wraps inside its own space */
+  .wname .wtitle, .wname button.linklike { flex: 1 1 150px; min-width: 0; }
+  .wname .wkey { flex: none; }
+  .att-older { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; }
+  .att-older button { font-size: 12px; padding: 2px 10px; }
+  .attention.calm .att-list { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -349,8 +478,9 @@
       <span class="live meta" aria-live="polite"><span class="dot paused" id="live-dot"></span><span id="live-text">Connecting…</span></span>
       <input type="search" id="search" placeholder="Search tasks (press /)" aria-label="Search tasks">
       <span class="seg" role="group" aria-label="View">
-        <button id="view-cards" type="button" aria-pressed="true">Cards</button>
-        <button id="view-board" type="button" aria-pressed="false">Board</button>
+        <button id="view-work" type="button" aria-pressed="false" title="Epic, Story and Subtask tree (key 1)">Work</button>
+        <button id="view-cards" type="button" aria-pressed="true" title="One card per task (key 2)">Cards</button>
+        <button id="view-board" type="button" aria-pressed="false" title="Lanes by status (key 3)">Board</button>
       </span>
       <button id="theme" type="button" title="Switch between automatic, light and dark">Theme: auto</button>
       <button id="toggle-live" type="button">Pause updates</button>
@@ -360,14 +490,11 @@
 
   <section class="tiles" aria-label="Summary" id="tiles"></section>
 
-  <section class="panel" id="live-panel" aria-label="Agents working now" hidden></section>
-  <div class="insights">
-    <section class="panel" id="status-panel" aria-label="Task flow"></section>
-    <section class="panel" id="roles-panel" aria-label="Cost by agent"></section>
-  </div>
+  <div class="layout">
+    <div class="primary">
+  <section class="panel attention calm" id="attention-panel" aria-label="Needs your attention" aria-live="polite"></section>
 
-  <section class="milestones" id="projects" aria-label="Projects" hidden></section>
-  <section class="milestones" id="milestones" aria-label="Milestones" hidden></section>
+  <section class="panel" id="live-panel" aria-label="Agents working now" hidden></section>
 
   <div class="filters">
     <label for="project-filter">Project</label>
@@ -386,6 +513,21 @@
 
   <section id="tasks" aria-label="Tasks"></section>
   <section id="board" class="board" aria-label="Task board" hidden></section>
+  <section id="work" class="wtree" aria-label="Work breakdown by Epic and Story" hidden></section>
+
+  <section class="milestones" id="projects" aria-label="Projects" hidden></section>
+  <section class="milestones" id="milestones" aria-label="Milestones" hidden></section>
+    </div>
+    <aside class="side" aria-label="Insights">
+  <section class="panel" id="activity-panel" aria-label="Recent activity" hidden></section>
+  <section class="panel" id="status-panel" aria-label="Task flow"></section>
+  <section class="panel" id="roles-panel" aria-label="Cost by agent"></section>
+    </aside>
+  </div>
+
+  <p class="hint shortcuts">
+    <kbd>1</kbd> Work <kbd>2</kbd> Cards <kbd>3</kbd> Board <kbd>/</kbd> Search <kbd>Esc</kbd> Close
+  </p>
 </main>
 <div id="backdrop"></div>
 <aside id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true">
@@ -423,6 +565,7 @@ const state = {
   open: new Set(), outputs: new Map(), failures: 0,
   view: "cards", query: "", drawer: null, seen: null, flash: new Set(),
   descriptions: new Map(), results: new Map(), loading: new Set(), opened: false,
+  collapsed: new Set(), showOlder: false, activitySeen: null, activityAll: false, viewChosen: true, autoViewed: false,
 };
 
 /* ---------- helpers ---------- */
@@ -725,6 +868,7 @@ function renderCard(task) {
       el("button", { type: "button", class: "primary", text: "Details", "aria-label": `Details of task ${task.id}`,
         onclick: () => openDrawer(task.id) }),
       actionButtons(task)),
+    crumbs(task),
     stepper(task),
     el("div", { class: "facts" },
       el("span", {}, "Tokens ", el("strong", { text: `${fmtInt(usage.input_tokens)} in / ${fmtInt(usage.output_tokens)} out` })),
@@ -767,11 +911,15 @@ function render() {
 
   const container = document.getElementById("tasks");
   const board = document.getElementById("board");
-  const boardView = state.view === "board";
-  container.hidden = boardView;
-  board.hidden = !boardView;
+  const work = document.getElementById("work");
+  container.hidden = state.view !== "cards";
+  board.hidden = state.view !== "board";
+  work.hidden = state.view !== "work";
 
-  if (boardView) renderBoard(visible);
+  renderAttention(data);
+  renderActivity(data);
+  if (state.view === "board") renderBoard(visible);
+  else if (state.view === "work") renderWork(data, visible);
   else renderCards(container, visible, data);
 
   drawerRender(false);
@@ -819,6 +967,9 @@ function tickDurations() {
     const start = total.dataset.taskStart ? parseTime(total.dataset.taskStart) : null;
     const end = total.dataset.taskEnd ? parseTime(total.dataset.taskEnd) : now;
     total.textContent = start ? fmtDuration((end - start) / 1000) : "–";
+  }
+  for (const node of document.querySelectorAll("[data-ago]")) {
+    node.textContent = ago((now - parseTime(node.dataset.ago)) / 1000);
   }
   for (const node of document.querySelectorAll("[data-elapsed]")) {
     const began = parseTime(node.dataset.elapsed);
@@ -872,11 +1023,12 @@ function cycleTheme() {
 }
 
 /* ----- view and filters ----- */
-function setView(view) {
+function setView(view, remember = true) {
   state.view = view;
-  store("view", view);
-  document.getElementById("view-cards").setAttribute("aria-pressed", String(view === "cards"));
-  document.getElementById("view-board").setAttribute("aria-pressed", String(view === "board"));
+  if (remember) { store("view", view); state.viewChosen = true; }
+  for (const name of ["work", "cards", "board"]) {
+    document.getElementById(`view-${name}`).setAttribute("aria-pressed", String(view === name));
+  }
   render();
 }
 function setFilter(value) {
@@ -963,6 +1115,7 @@ function miniCard(task) {
   el("div", { class: "m" },
     stateBadge(STATUS_TEXT, task.status),
     task.current_stage && ACTIVE.has(task.status) ? el("span", { text: `stage: ${task.current_stage}` }) : null,
+    task.hierarchy.length ? el("span", { title: "Epic › Story", text: task.hierarchy.map((h) => h.key).join(" › ") }) : null,
     task.blocked_by.length && task.status === "blocked" ? el("span", { text: `waiting for ${task.blocked_by.join(", ")}` }) : null,
     el("span", {}, "Time ", el("strong", { "data-task-start": span.start, "data-task-end": span.end, text: "–" })),
     fmtCost(task.usage.cost_usd)),
@@ -1130,6 +1283,7 @@ function drawerSections(task) {
       task.jira_key ? el("span", { class: "meta" }, task.jira_url ? link(task.jira_url, task.jira_key) : task.jira_key) : null,
       task.github_issue_number ? el("span", { class: "meta" }, task.issue_url ? link(task.issue_url, `issue #${task.github_issue_number}`) : `issue #${task.github_issue_number}`) : null,
       task.pull_request_url ? el("span", { class: "meta" }, link(task.pull_request_url, "Pull request")) : null),
+    ...hierarchyBlock(task),
     el("div", { style: "margin: 10px 0" }, actionButtons(task)),
     el("div", { class: "facts" },
       el("span", {}, "Tokens ", el("strong", { text: `${fmtInt(usage.input_tokens)} in / ${fmtInt(usage.output_tokens)} out` })),
@@ -1188,10 +1342,338 @@ function detectChanges(data) {
   state.seen = next;
 }
 
+/* ---------- v3: hierarchy, attention and activity ---------- */
+const TYPE_ICON = { Epic: "◆", Story: "▪", Subtask: "●", Task: "●", Bug: "●" };
+const typeClass = (type) => `type-${(type || "task").toLowerCase()}`;
+
+// A task whose pull request is open and waiting for a person to merge it.
+const awaitingMerge = (task) =>
+  task.status === "completed" && Boolean(task.pull_request_url) && task.board_column === "PR open";
+
+function phase(task) {
+  if (awaitingMerge(task)) return "review";
+  if (task.status === "completed") return "merged";
+  if (ACTIVE.has(task.status)) return "working";
+  if (task.status === "queued" || task.status === "blocked") return "waiting";
+  return "failed";
+}
+const PHASES = [
+  ["merged", "Merged", "var(--s-done)"], ["review", "PR open", "var(--role-reviewer)"],
+  ["working", "Working", "var(--s-work)"], ["waiting", "Waiting", "var(--s-queued)"],
+  ["failed", "Failed", "var(--s-fail)"],
+];
+
+function ago(seconds) {
+  if (!isFinite(seconds) || seconds < 5) return "just now";
+  if (seconds < 60) return `${Math.floor(seconds)}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function crumbItem(node) {
+  return el("span", { class: `crumb ${typeClass(node.type)}`, title: `${node.type}: ${node.title}` },
+    el("span", { class: "typeico", "aria-hidden": "true", text: TYPE_ICON[node.type] || "◇" }),
+    node.url ? link(node.url, node.key) : el("span", { text: node.key }),
+    el("span", { class: "ct", text: node.title }));
+}
+
+function crumbs(task) {
+  if (!task.hierarchy || !task.hierarchy.length) return null;
+  const parts = [];
+  task.hierarchy.forEach((node, index) => {
+    if (index) parts.push(el("span", { class: "sep", "aria-hidden": "true", text: "›" }));
+    parts.push(crumbItem(node));
+  });
+  return el("div", { class: "crumbs", "aria-label": "Where this task sits in Jira" }, parts);
+}
+
+function hierarchyBlock(task) {
+  if (!task.hierarchy || !task.hierarchy.length) return [];
+  return [
+    el("h3", { text: "Where this fits" }),
+    crumbs(task),
+    el("p", { class: "hint", text: "The builder, tester and reviewer were given this Epic and Story as background context." }),
+  ];
+}
+
+/* ----- what needs a person ----- */
+// Tasks older than this are listed behind a toggle: their pull requests were most likely
+// merged long ago, and a stale list would teach people to ignore the panel.
+const ATTENTION_MAX_AGE_MS = 48 * 3600 * 1000;
+
+function attentionItems(data) {
+  const byLabel = new Map(data.tasks.map((task) => [taskLabel(task), task]));
+  const releases = new Map();
+  for (const task of data.tasks) {
+    if (task.status !== "blocked") continue;
+    for (const entry of task.blocked_by) {
+      const blocker = byLabel.get(entry);
+      if (blocker && awaitingMerge(blocker)) {
+        releases.set(blocker.id, [...(releases.get(blocker.id) || []), taskLabel(task)]);
+      }
+    }
+  }
+  const items = [];
+  for (const task of data.tasks) {
+    if (!awaitingMerge(task)) continue;
+    const frees = releases.get(task.id);
+    items.push({ kind: "merge", task,
+      text: `${taskLabel(task)} passed review. Merge its pull request to finish it`
+        + (frees ? `; that also releases ${frees.join(", ")}.` : ".") });
+  }
+  for (const task of data.tasks) {
+    if (task.status !== "failed") continue;
+    items.push({ kind: "failed", task,
+      text: `${taskLabel(task)} failed${task.current_stage ? ` at the ${task.current_stage} stage` : ""}. Open it to see why.` });
+  }
+  const cutoff = Date.now() - ATTENTION_MAX_AGE_MS;
+  const recent = items.filter((item) => parseTime(item.task.created_at) >= cutoff);
+  return { recent, older: items.filter((item) => !recent.includes(item)) };
+}
+
+function updateTitle(data, toMerge) {
+  const bits = [];
+  if (data.summary.active_agents) bits.push(`${data.summary.active_agents} running`);
+  if (toMerge) bits.push(`${toMerge} to merge`);
+  document.title = (bits.length ? `(${bits.join(" · ")}) ` : "") + "Agent Orchestrator";
+}
+
+function attentionRow({ kind, task, text }) {
+  const href = kind === "merge" ? safeUrl(task.pull_request_url) : null;
+  return el("div", { class: "att-item" },
+    el("span", { class: "att-ico" + (kind === "failed" ? " failed" : ""), "aria-hidden": "true", text: kind === "failed" ? "!" : "↗" }),
+    el("span", { class: "what", text }),
+    href ? el("a", { class: "btnlink", href, target: "_blank", rel: "noopener noreferrer", text: "Open pull request" }) : null,
+    el("button", { type: "button", text: "Details", "aria-label": `Details of ${taskLabel(task)}`, onclick: () => openDrawer(task.id) }));
+}
+
+function renderAttention(data) {
+  const box = document.getElementById("attention-panel");
+  const { recent, older } = attentionItems(data);
+  updateTitle(data, recent.filter((item) => item.kind === "merge").length);
+  const signature = JSON.stringify([recent.map((i) => [i.kind, i.task.id, i.text]),
+    older.map((i) => [i.kind, i.task.id]), state.showOlder, data.summary.active_agents]);
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
+  box.className = "panel attention" + (recent.length ? "" : " calm");
+
+  const olderBlock = older.length
+    ? [el("div", { class: "att-older" },
+        el("span", { class: "meta", text: `${older.length} older item${older.length === 1 ? "" : "s"} (PR open or failed, more than 2 days old). Probably already handled.` }),
+        el("button", { type: "button", text: state.showOlder ? "Hide" : "Show",
+          onclick: () => { state.showOlder = !state.showOlder; renderAttention(state.data); } })),
+      ...(state.showOlder ? [el("div", { class: "att-list" }, older.map(attentionRow))] : [])]
+    : [];
+
+  if (!recent.length) {
+    const working = data.summary.active_agents;
+    box.replaceChildren(
+      el("h2", {}, el("span", { class: "att-ico ok", "aria-hidden": "true", text: "✓" }), "Nothing needs you right now"),
+      el("p", { class: "meta", text: working
+        ? `${working} agent${working === 1 ? " is" : "s are"} working. Pull requests to merge and failed tasks will appear here.`
+        : "No recent pull request is waiting for a merge and no recent task has failed." }),
+      ...olderBlock);
+    return;
+  }
+  box.replaceChildren(
+    el("h2", { text: `Needs your attention (${recent.length})` }),
+    el("div", { class: "att-list" }, recent.map(attentionRow)),
+    ...olderBlock);
+}
+
+/* ----- activity feed ----- */
+function renderActivity(data) {
+  const box = document.getElementById("activity-panel");
+  const events = data.activity || [];
+  box.hidden = events.length === 0;
+  const shown = state.activityAll ? events : events.slice(0, 8);
+  const signature = JSON.stringify([shown.map((e) => [e.at, e.task_id, e.text]), state.activityAll]);
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
+
+  const idOf = (e) => `${e.at}|${e.task_id}|${e.text}`;
+  const known = state.activitySeen;
+  box.replaceChildren(
+    el("div", { class: "activity-head" },
+      el("h2", {}, el("span", { class: "pulse", "aria-hidden": "true" }), "Activity"),
+      events.length > 8
+        ? el("button", { type: "button", text: state.activityAll ? "Show fewer" : `Show all ${events.length}`,
+            onclick: () => { state.activityAll = !state.activityAll; renderActivity(state.data); } })
+        : null),
+    el("ol", { class: "feed" }, shown.map((event) =>
+      el("li", { class: "act" + (known && !known.has(idOf(event)) ? " fresh" : "") },
+        el("span", { class: "ago", "data-ago": event.at, text: "–" }),
+        el("span", { class: `kind ${event.kind}`, "aria-hidden": "true" }),
+        el("span", {},
+          el("button", { type: "button", class: "linklike", title: "Open this task", text: event.label,
+            onclick: () => openDrawer(event.task_id) }),
+          event.text)))));
+  state.activitySeen = new Set(events.map(idOf));
+  tickDurations();
+}
+
+/* ----- work view: Epic > Story > Subtask ----- */
+function persistCollapsed() {
+  store("collapsed", JSON.stringify([...state.collapsed]));
+  const box = document.getElementById("work");
+  delete box.dataset.signature;
+  if (state.data) render();
+}
+
+function toggleNode(key) {
+  if (state.collapsed.has(key)) state.collapsed.delete(key); else state.collapsed.add(key);
+  persistCollapsed();
+}
+
+function workModel(data) {
+  const tasksById = new Map(data.tasks.map((task) => [task.id, task]));
+  const nodes = new Map(data.work_items.map((item) => [item.key,
+    { ...item, children: [], task: item.task_id ? tasksById.get(item.task_id) || null : null }]));
+  const roots = [];
+  for (const node of nodes.values()) {
+    const parent = node.parent_key ? nodes.get(node.parent_key) : null;
+    (parent ? parent.children : roots).push(node);
+  }
+  roots.reverse(); // newest Epic first
+  const linked = new Set(data.work_items.map((item) => item.task_id).filter(Boolean));
+  const loose = data.tasks.filter((task) => !linked.has(task.id)).map((task) => ({
+    key: taskLabel(task), type: task.jira_type || "Task", title: shortTitle(task), url: task.jira_url,
+    parent_key: null, task, children: [],
+  }));
+  return { roots, loose };
+}
+
+function leafTasks(node) {
+  return [...(node.task ? [node.task] : []), ...node.children.flatMap(leafTasks)];
+}
+
+function rollup(node, show) {
+  const counts = {};
+  let cost = 0, total = 0;
+  for (const task of leafTasks(node)) {
+    if (!show.has(task.id)) continue;
+    const kind = phase(task);
+    counts[kind] = (counts[kind] || 0) + 1;
+    cost += task.usage.cost_usd;
+    total += 1;
+  }
+  return { counts, cost, total };
+}
+
+function phaseBar(counts) {
+  return el("div", { class: "statusbar thin", role: "img",
+    "aria-label": PHASES.map(([key, label]) => `${label} ${counts[key] || 0}`).join(", ") },
+    PHASES.filter(([key]) => counts[key]).map(([key, label, color]) =>
+      el("span", { style: `flex-grow:${counts[key]};background:${color}`, title: `${label}: ${counts[key]}` })));
+}
+
+function workRow(node, depth, show) {
+  const info = rollup(node, show);
+  const task = node.task;
+  const hasKids = node.children.length > 0;
+  const collapsed = state.collapsed.has(node.key);
+  const container = hasKids || !task;
+  const phaseNow = task ? phase(task) : null;
+  const lane = phaseNow ? PHASES.find(([key]) => key === phaseNow)[2] : null;
+
+  const name = el("div", { class: "wname" },
+    hasKids
+      ? el("button", { type: "button", class: "twisty", "aria-expanded": String(!collapsed),
+          "aria-label": `${collapsed ? "Expand" : "Collapse"} ${node.key}`, onclick: () => toggleNode(node.key),
+          text: collapsed ? "▸" : "▾" })
+      : el("span", { class: "twisty spacer" }),
+    el("span", { class: `typeico ${typeClass(node.type)}`, title: node.type, "aria-hidden": "true", text: TYPE_ICON[node.type] || "◇" }),
+    el("span", { class: "wkey" }, node.url ? link(node.url, node.key) : node.key),
+    task
+      ? el("button", { type: "button", class: "linklike", title: "Open details", text: node.title, onclick: () => openDrawer(task.id) })
+      : el("span", { class: "wtitle", text: node.title }));
+
+  let middle, stats, actions;
+  if (container) {
+    const merged = info.counts.merged || 0;
+    middle = info.total ? phaseBar(info.counts) : el("span", { class: "meta", text: "–" });
+    stats = el("div", { class: "wstats" },
+      info.total ? el("span", {}, el("strong", { text: `${merged} of ${info.total}` }), " merged") : el("span", { text: "No tasks imported yet" }),
+      ...PHASES.filter(([key]) => key !== "merged" && info.counts[key]).map(([key, label]) =>
+        el("span", { text: `${info.counts[key]} ${label.toLowerCase()}` })),
+      info.total ? el("span", { text: fmtCost(info.cost) }) : null);
+    actions = el("div", { class: "wact" }, el("span", { class: "chip", text: node.type }));
+  } else {
+    const span = taskSpan(task.runs);
+    middle = el("div", { class: "pips", "aria-hidden": "true" },
+      task.stages.map((stage) => el("i", { class: `st-${stage.state}`, title: `${stage.label}: ${stage.state}` })));
+    stats = el("div", { class: "wstats" },
+      stateBadge(STATUS_TEXT, task.status),
+      task.current_stage && ACTIVE.has(task.status) ? el("span", { text: task.current_stage }) : null,
+      task.blocked_by.length && task.status === "blocked" ? el("span", { text: `waiting for ${task.blocked_by.join(", ")}` }) : null,
+      el("span", {}, el("strong", { "data-task-start": span.start, "data-task-end": span.end, text: "–" })),
+      el("span", { text: fmtCost(task.usage.cost_usd) }));
+    const prHref = awaitingMerge(task) ? safeUrl(task.pull_request_url) : null;
+    actions = el("div", { class: "wact" },
+      prHref ? el("a", { class: "btnlink", href: prHref, target: "_blank", rel: "noopener noreferrer", text: "Merge PR" }) : null,
+      el("button", { type: "button", text: "Details", "aria-label": `Details of ${taskLabel(task)}`, onclick: () => openDrawer(task.id) }));
+  }
+
+  return el("div", {
+    class: `wrow depth-${Math.min(depth, 2)} ${container ? `container ${typeClass(node.type)}` : "leaf"}`
+      + (task && ACTIVE.has(task.status) ? " is-running" : ""),
+    style: lane ? `--lane:${lane}` : null,
+  }, name, middle, stats, actions);
+}
+
+function renderWork(data, visible) {
+  const box = document.getElementById("work");
+  const show = new Set(visible.map((task) => task.id));
+  const filtering = visible.length < data.tasks.length;
+  const signature = JSON.stringify([
+    visible.map((t) => [t.id, t.status, t.current_stage, t.board_column, t.usage.cost_usd, t.pull_request_url,
+      t.blocked_by, t.stages.map((s) => s.state)]),
+    [...state.collapsed], data.work_items.map((w) => [w.key, w.title]), filtering]);
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
+
+  const { roots, loose } = workModel(data);
+  const rows = [];
+  const walk = (node, depth) => {
+    if (filtering && !rollup(node, show).total) return;
+    rows.push(workRow(node, depth, show));
+    if (!state.collapsed.has(node.key)) node.children.forEach((child) => walk(child, depth + 1));
+  };
+  roots.forEach((root) => walk(root, 0));
+
+  const looseShown = loose.filter((node) => show.has(node.task.id));
+  if (looseShown.length) {
+    const group = { key: "__loose", type: "Other", title: `Tasks without a Jira parent (${looseShown.length})`,
+      url: null, task: null, children: looseShown };
+    rows.push(el("div", { class: "wrow container" },
+      el("div", { class: "wname" },
+        el("button", { type: "button", class: "twisty", "aria-expanded": String(!state.collapsed.has("__loose")),
+          "aria-label": `${state.collapsed.has("__loose") ? "Expand" : "Collapse"} tasks without a Jira parent`,
+          onclick: () => toggleNode("__loose"), text: state.collapsed.has("__loose") ? "▸" : "▾" }),
+        el("span", { class: "wtitle", text: group.title })),
+      el("span", { class: "meta", text: "GitHub issues and tasks imported before the hierarchy existed" }),
+      el("span"), el("span")));
+    if (!state.collapsed.has("__loose")) looseShown.forEach((node) => rows.push(workRow(node, 1, show)));
+  }
+
+  box.replaceChildren(...(rows.length ? rows : [el("div", { class: "empty", text: data.tasks.length
+    ? "No tasks match this filter."
+    : "No tasks yet. Move a Jira issue to To Do and it appears here with its Epic and Story." })]));
+  tickDurations();
+}
+
 /* ---------- data loading ---------- */
 function setLive(kind, text) {
   document.getElementById("live-dot").className = "dot" + (kind ? ` ${kind}` : "");
   document.getElementById("live-text").textContent = text;
+}
+
+// An older server may not send the newer fields; treat them as empty.
+function normalize(data) {
+  data.work_items = data.work_items || [];
+  data.activity = data.activity || [];
+  for (const task of data.tasks) task.hierarchy = task.hierarchy || [];
 }
 
 async function refresh() {
@@ -1199,8 +1681,14 @@ async function refresh() {
     const response = await fetch("/dashboard/overview", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.data = await response.json();
+    normalize(state.data);
     state.failures = 0;
     detectChanges(state.data);
+    if (!state.viewChosen && !state.autoViewed && state.data.work_items.length) {
+      // First visit: show the Epic > Story tree whenever Jira hierarchy exists.
+      state.autoViewed = true;
+      setView("work", false);
+    }
     render();
     openFromHash();
     setLive(state.live ? "" : "paused",
@@ -1252,6 +1740,7 @@ document.getElementById("search").addEventListener("input", (event) => {
   state.query = event.target.value;
   render();
 });
+document.getElementById("view-work").addEventListener("click", () => setView("work"));
 document.getElementById("view-cards").addEventListener("click", () => setView("cards"));
 document.getElementById("view-board").addEventListener("click", () => setView("board"));
 document.getElementById("theme").addEventListener("click", cycleTheme);
@@ -1267,6 +1756,9 @@ document.addEventListener("keydown", (event) => {
   } else if (event.key === "/" && !typing) {
     event.preventDefault();
     document.getElementById("search").focus();
+  } else if (!typing && !state.drawer && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    const view = { "1": "work", "2": "cards", "3": "board" }[event.key];
+    if (view) setView(view);
   }
 });
 
@@ -1281,8 +1773,10 @@ function openFromHash() {
   const forced = new URLSearchParams(location.search).get("theme");
   applyTheme(forced === "dark" || forced === "light" ? forced : stored("theme", "auto"));
   // ?view=board or ?view=cards overrides the remembered view.
-  const asked = new URLSearchParams(location.search).get("view") || stored("view", "cards");
-  setView(asked === "board" ? "board" : "cards");
+  const asked = new URLSearchParams(location.search).get("view") || stored("view", "");
+  state.viewChosen = Boolean(asked);
+  try { state.collapsed = new Set(JSON.parse(stored("collapsed", '["__loose"]'))); } catch { state.collapsed = new Set(["__loose"]); }
+  setView(["board", "work"].includes(asked) ? asked : "cards", false);
 }
 
 setInterval(tickDurations, 1000);

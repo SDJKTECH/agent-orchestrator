@@ -1,10 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from orchestrator.app.api import control_routes, task_routes
 from orchestrator.app.dashboard import routes as dashboard_routes
-from orchestrator.app.dashboard.service import build_overview
+from orchestrator.app.dashboard.service import MAX_ACTIVITY_EVENTS, build_overview
 from orchestrator.app.db.models import (
     AgentRun,
     Milestone,
@@ -13,6 +14,7 @@ from orchestrator.app.db.models import (
     TaskStatus,
     VerificationResult,
 )
+from orchestrator.app.jira.models import JiraItem
 
 
 @pytest.fixture
@@ -478,3 +480,245 @@ def test_dashboard_reads_zone_less_times_as_utc() -> None:
 
     assert "function parseTime(" in source
     assert "Date.parse(" not in source.replace("return Date.parse(", "")
+
+
+def add_jira_items(routes_client, items):
+    """Save (key, type, summary, parent_key) rows; parents must come first."""
+    with routes_client.session_factory() as session:
+        project = session.scalar(select(Project))
+        for key, kind, summary, parent in items:
+            session.add(
+                JiraItem(
+                    key=key,
+                    type=kind,
+                    summary=summary,
+                    project_id=project.id,
+                    parent_key=parent,
+                )
+            )
+            session.flush()
+        session.commit()
+
+
+def test_a_task_carries_its_epic_and_story(routes_client, seeded) -> None:
+    add_jira_items(
+        routes_client,
+        [
+            ("SG-8", "Epic", "Gameplay variety", None),
+            ("SG-9", "Story", "Bonus food", "SG-8"),
+            ("SG-11", "Subtask", "Add bonus food", "SG-9"),
+        ],
+    )
+    seeded(TaskStatus.COMPLETED, jira_key="SG-11", title="SG-11: Add bonus food")
+
+    task = overview(routes_client).tasks[0]
+
+    assert task.jira_type == "Subtask"
+    assert [(h.key, h.type, h.title) for h in task.hierarchy] == [
+        ("SG-8", "Epic", "Gameplay variety"),
+        ("SG-9", "Story", "Bonus food"),
+    ]
+
+
+def test_work_items_list_every_issue_and_link_tasks_to_their_issue(
+    routes_client, seeded
+) -> None:
+    add_jira_items(
+        routes_client,
+        [
+            ("SG-8", "Epic", "Gameplay variety", None),
+            ("SG-9", "Story", "Bonus food", "SG-8"),
+            ("SG-11", "Subtask", "Add bonus food", "SG-9"),
+        ],
+    )
+    task_id = seeded(TaskStatus.QUEUED, jira_key="SG-11")
+
+    items = {item.key: item for item in overview(routes_client).work_items}
+
+    assert set(items) == {"SG-8", "SG-9", "SG-11"}
+    assert items["SG-9"].parent_key == "SG-8"
+    assert items["SG-8"].task_id is None
+    assert items["SG-11"].task_id == task_id
+    assert items["SG-11"].title == "Add bonus food"
+
+
+def test_a_task_without_a_jira_record_has_no_hierarchy(routes_client, seeded) -> None:
+    seeded(TaskStatus.QUEUED)
+    seeded(TaskStatus.QUEUED, jira_key="SG-77")
+
+    result = overview(routes_client)
+
+    assert all(task.hierarchy == [] for task in result.tasks)
+    assert all(task.jira_type is None for task in result.tasks)
+    assert result.work_items == []
+
+
+def test_a_parent_loop_does_not_hang_the_overview(routes_client, seeded) -> None:
+    add_jira_items(
+        routes_client, [("A-1", "Story", "one", None), ("A-2", "Story", "two", "A-1")]
+    )
+    with routes_client.session_factory() as session:
+        first = session.scalar(select(JiraItem).where(JiraItem.key == "A-1"))
+        first.parent_key = "A-2"
+        session.commit()
+    seeded(TaskStatus.QUEUED, jira_key="A-2")
+
+    task = overview(routes_client).tasks[0]
+
+    assert [h.key for h in task.hierarchy] == ["A-1"]
+
+
+def finished_run(task_id, role, started, seconds, cost=0.25, status="COMPLETED"):
+    return AgentRun(
+        task_id=task_id,
+        agent_role=role,
+        model="sonnet",
+        effort="medium",
+        status=status,
+        reported_cost_usd=cost,
+        started_at=started,
+        finished_at=started + timedelta(seconds=seconds),
+    )
+
+
+def test_activity_lists_what_happened_newest_first(routes_client, seeded) -> None:
+    task_id = seeded(TaskStatus.COMPLETED, jira_key="SG-5", title="SG-5: x")
+    start = datetime.now(UTC) - timedelta(minutes=10)
+
+    with routes_client.session_factory() as session:
+        session.get(Task, task_id).created_at = start - timedelta(minutes=1)
+        session.add(finished_run(task_id, "builder", start, 98))
+        session.add(
+            finished_run(task_id, "tester", start + timedelta(minutes=3), 45, 0.04)
+        )
+        session.commit()
+
+    events = overview(routes_client).activity
+    texts = [event.text for event in events]
+
+    assert texts[0] == "Tester finished · 45s · $0.04"
+    assert "Builder finished · 1m 38s · $0.25" in texts
+    assert "Builder started" in texts
+    assert texts[-1] == "Task added"
+    assert [e.at for e in events] == sorted((e.at for e in events), reverse=True)
+    assert {event.label for event in events} == {"SG-5"}
+    assert {event.task_id for event in events} == {task_id}
+
+
+def test_activity_marks_stopped_runs_and_never_mixes_time_zones(
+    routes_client, seeded
+) -> None:
+    task_id = seeded(TaskStatus.CANCELLED)
+
+    with routes_client.session_factory() as session:
+        session.add(
+            finished_run(task_id, "builder", datetime.now(UTC), 12, 0, "CANCELLED")
+        )
+        session.commit()
+
+    events = overview(routes_client).activity
+
+    assert any(
+        e.kind == "stopped" and e.text.startswith("Builder cancelled") for e in events
+    )
+    assert all(event.at.tzinfo is None for event in events)
+
+
+def test_checks_saved_together_are_one_activity_event(routes_client, seeded) -> None:
+    passing = seeded(
+        TaskStatus.COMPLETED,
+        checks=[("unit_tests", True), ("ruff_check", True), ("ruff_format", True)],
+        title="passing",
+    )
+    failing = seeded(
+        TaskStatus.FAILED,
+        checks=[("unit_tests", True), ("ruff_format", False)],
+        title="failing",
+    )
+
+    events = overview(routes_client).activity
+    by_task = {
+        task_id: [
+            e for e in events if e.task_id == task_id and e.kind.startswith("checks")
+        ]
+        for task_id in (passing, failing)
+    }
+
+    assert [(e.kind, e.text) for e in by_task[passing]] == [
+        ("checks_ok", "Checks passed · 3/3")
+    ]
+    assert [(e.kind, e.text) for e in by_task[failing]] == [
+        ("checks_failed", "Checks failed · ruff_format")
+    ]
+
+
+def test_activity_is_capped(routes_client, seeded) -> None:
+    for number in range(MAX_ACTIVITY_EVENTS):
+        seeded(TaskStatus.QUEUED, title=f"task {number}")
+
+    assert len(overview(routes_client).activity) == MAX_ACTIVITY_EVENTS
+
+
+def test_overview_endpoint_includes_hierarchy_and_activity(
+    routes_client, seeded, monkeypatch
+) -> None:
+    from orchestrator.app.core.config import Settings
+
+    routes_client.app.include_router(dashboard_routes.router)
+    monkeypatch.setattr(
+        dashboard_routes,
+        "get_settings",
+        lambda: Settings(_env_file=None, github_repo="owner/repo"),
+    )
+    add_jira_items(
+        routes_client,
+        [("SG-8", "Epic", "Variety", None), ("SG-11", "Subtask", "Bonus", "SG-8")],
+    )
+    seeded(TaskStatus.QUEUED, jira_key="SG-11")
+
+    data = routes_client.client.get("/dashboard/overview").json()
+
+    assert data["tasks"][0]["hierarchy"][0]["key"] == "SG-8"
+    assert data["tasks"][0]["jira_type"] == "Subtask"
+    assert {item["key"] for item in data["work_items"]} == {"SG-8", "SG-11"}
+    assert data["activity"][0]["label"] == "SG-11"
+
+
+def test_dashboard_page_has_the_work_attention_and_activity_views() -> None:
+    source = _dashboard_source()
+
+    for marker in (
+        'id="view-work"',
+        'id="work"',
+        'id="attention-panel"',
+        'id="activity-panel"',
+        "function renderWork",
+        "function workModel",
+        "function renderAttention",
+        "function attentionItems",
+        "function renderActivity",
+        "function crumbs",
+        "function hierarchyBlock",
+        "function normalize(",
+        'class="layout"',
+    ):
+        assert marker in source
+
+
+def test_dashboard_page_copes_with_an_older_server() -> None:
+    source = _dashboard_source()
+    normalize = _function_body(source, "normalize")
+
+    assert "data.work_items = data.work_items || [];" in normalize
+    assert "data.activity = data.activity || [];" in normalize
+    assert "task.hierarchy = task.hierarchy || [];" in normalize
+    assert "normalize(state.data);" in source
+
+
+def test_dashboard_page_hides_stale_attention_items() -> None:
+    source = _dashboard_source()
+
+    assert "const ATTENTION_MAX_AGE_MS" in source
+    assert "parseTime(item.task.created_at) >= cutoff" in source
+    # A null child would be printed as the text "null" by replaceChildren.
+    assert ": null)" not in _function_body(source, "renderAttention")

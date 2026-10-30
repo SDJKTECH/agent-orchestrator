@@ -82,6 +82,36 @@ class DashboardCheck(BaseModel):
     created_at: datetime
 
 
+class HierarchyNode(BaseModel):
+    """One Jira parent of a task (its Story or Epic)."""
+
+    key: str
+    type: str
+    title: str
+    url: str | None = None
+
+
+class WorkItem(BaseModel):
+    """A Jira issue the orchestrator knows: an Epic, Story or the task's own issue."""
+
+    key: str
+    type: str
+    title: str
+    parent_key: str | None = None
+    url: str | None = None
+    task_id: int | None = None
+
+
+class ActivityEvent(BaseModel):
+    """Something that happened to a task, for the dashboard's activity feed."""
+
+    at: datetime
+    kind: str
+    task_id: int
+    label: str
+    text: str
+
+
 class DashboardTask(BaseModel):
     """Everything the dashboard shows about one task."""
 
@@ -91,6 +121,9 @@ class DashboardTask(BaseModel):
     issue_url: str | None
     jira_key: str | None = None
     jira_url: str | None = None
+    jira_type: str | None = None
+    # The Jira Epic and Story above the task, outermost first.
+    hierarchy: list[HierarchyNode] = []
     blocked_by: list[str] = []
     status: TaskStatus
     milestone: str | None
@@ -153,3 +186,7 @@ class DashboardOverview(BaseModel):
     projects: list[DashboardProject] = []
     milestones: list[DashboardMilestone]
     tasks: list[DashboardTask]
+    # Every Jira issue on record (Epics and Stories included), for the Work view.
+    work_items: list[WorkItem] = []
+    # Newest first.
+    activity: list[ActivityEvent] = []

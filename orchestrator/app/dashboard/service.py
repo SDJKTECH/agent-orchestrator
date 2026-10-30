@@ -1,12 +1,14 @@
 # Builds the dashboard overview from the database in one snapshot.
 # Works out each task's stage states, branches, usage and milestone totals.
 from datetime import UTC, datetime
+from functools import partial
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session, selectinload
 
 from orchestrator.app.core.config import get_settings
 from orchestrator.app.dashboard.schemas import (
+    ActivityEvent,
     BranchInfo,
     DashboardCheck,
     DashboardMilestone,
@@ -15,11 +17,13 @@ from orchestrator.app.dashboard.schemas import (
     DashboardRun,
     DashboardSummary,
     DashboardTask,
+    HierarchyNode,
     RoleUsage,
     RunDetail,
     StageInfo,
     TaskActions,
     UsageTotals,
+    WorkItem,
 )
 from orchestrator.app.db.models import (
     CANCELLABLE_STATUSES,
@@ -31,6 +35,7 @@ from orchestrator.app.db.models import (
     Task,
     TaskStatus,
 )
+from orchestrator.app.jira.models import JiraItem
 from orchestrator.app.planning.dependencies import get_blockers
 
 AGENT_ROLES = ("builder", "tester", "reviewer")
@@ -44,6 +49,10 @@ STAGE_LABELS = {
 }
 
 ACTIVE_RUN_STATUSES = ("STARTING", "RUNNING", "PAUSED")
+
+MAX_ACTIVITY_EVENTS = 40
+# Check results saved within this many seconds belong to one run of the checks.
+CHECK_BATCH_SECONDS = 10
 
 _RUN_STATE = {
     "STARTING": "running",
@@ -224,8 +233,139 @@ def _branches(task: Task, runs: list[AgentRun], repo: str | None) -> list[Branch
     ]
 
 
-def _task_view(task: Task, repo: str | None) -> DashboardTask:
+def _jira_url(key: str | None) -> str | None:
+    """The web address of a Jira issue, when Jira is configured."""
+    base = get_settings().jira_base_url
+    return f"{base.rstrip('/')}/browse/{key}" if key and base else None
+
+
+def _hierarchy(task: Task, items: dict[str, JiraItem]) -> list[HierarchyNode]:
+    """The task's Epic and Story, outermost first (empty without a Jira record)."""
+    item = items.get(task.jira_key) if task.jira_key else None
+    chain: list[HierarchyNode] = []
+    seen = {task.jira_key}
+    key = item.parent_key if item else None
+
+    while key and key not in seen and key in items:
+        parent = items[key]
+        chain.append(
+            HierarchyNode(
+                key=parent.key,
+                type=parent.type,
+                title=parent.summary,
+                url=_jira_url(parent.key),
+            )
+        )
+        seen.add(key)
+        key = parent.parent_key
+
+    chain.reverse()
+    return chain
+
+
+def _work_items(items: dict[str, JiraItem], task_ids: dict[str, int]) -> list[WorkItem]:
+    """Every Jira issue on record, with the orchestrator task that builds it."""
+    return [
+        WorkItem(
+            key=item.key,
+            type=item.type,
+            title=item.summary,
+            parent_key=item.parent_key,
+            url=_jira_url(item.key),
+            task_id=task_ids.get(item.key),
+        )
+        for item in sorted(items.values(), key=lambda item: item.id)
+    ]
+
+
+def _utc(moment: datetime) -> datetime:
+    """The time as naive UTC, which is how the database and the page treat it."""
+    if moment.tzinfo is not None:
+        return moment.astimezone(UTC).replace(tzinfo=None)
+    return moment
+
+
+def _short(seconds: float) -> str:
+    """A run time like '45s' or '3m 12s'."""
+    whole = round(seconds)
+    return f"{whole}s" if whole < 60 else f"{whole // 60}m {whole % 60}s"
+
+
+def _event(
+    events: list[ActivityEvent], task: Task, at: datetime, kind: str, text: str
+) -> None:
+    """Append one activity event for `task`."""
+    events.append(
+        ActivityEvent(
+            at=_utc(at),
+            kind=kind,
+            task_id=task.id,
+            label=task.jira_key or f"#{task.id}",
+            text=text,
+        )
+    )
+
+
+def _activity(tasks: list[Task]) -> list[ActivityEvent]:
+    """What happened lately, newest first: tasks added, agents started and finished,
+    and checks run. Built from rows already saved, so it survives restarts."""
+    events: list[ActivityEvent] = []
+
+    for task in tasks:
+        add = partial(_event, events, task)
+
+        add(task.created_at, "added", "Task added")
+
+        for run in task.agent_runs:
+            role = STAGE_LABELS.get(run.agent_role, run.agent_role)
+
+            if run.started_at:
+                add(run.started_at, "started", f"{role} started")
+
+            if run.finished_at:
+                took = _short(_seconds(run))
+                cost = f"${run.reported_cost_usd:.2f}" if run.reported_cost_usd else ""
+                detail = " · ".join(part for part in (took, cost) if part)
+                outcome = run.status.lower()
+
+                if outcome == "completed":
+                    add(run.finished_at, "finished", f"{role} finished · {detail}")
+                else:
+                    add(run.finished_at, "stopped", f"{role} {outcome} · {detail}")
+
+        batches: list[list] = []
+        for result in sorted(task.verification_results, key=lambda r: r.id):
+            last = batches[-1][-1] if batches else None
+            gap = (
+                (_utc(result.created_at) - _utc(last.created_at)).total_seconds()
+                if last
+                else None
+            )
+            if gap is not None and gap <= CHECK_BATCH_SECONDS:
+                batches[-1].append(result)
+            else:
+                batches.append([result])
+
+        for batch in batches:
+            passed = sum(result.passed for result in batch)
+            failed = [r.check_name for r in batch if not r.passed]
+            add(
+                batch[-1].created_at,
+                "checks_ok" if not failed else "checks_failed",
+                f"Checks passed · {passed}/{len(batch)}"
+                if not failed
+                else f"Checks failed · {', '.join(failed)}",
+            )
+
+    events.sort(key=lambda event: event.at, reverse=True)
+    return events[:MAX_ACTIVITY_EVENTS]
+
+
+def _task_view(
+    task: Task, repo: str | None, items: dict[str, JiraItem] | None = None
+) -> DashboardTask:
     """Build the dashboard model of one task: stages, checks, usage and actions."""
+    items = items or {}
     runs = sorted(task.agent_runs, key=lambda run: run.id)
     checks = _latest_checks(task)
 
@@ -241,10 +381,8 @@ def _task_view(task: Task, repo: str | None) -> DashboardTask:
     if repo and task.github_issue_number:
         issue_url = f"https://github.com/{repo}/issues/{task.github_issue_number}"
 
-    jira_url = None
-    jira_base = get_settings().jira_base_url
-    if task.jira_key and jira_base:
-        jira_url = f"{jira_base.rstrip('/')}/browse/{task.jira_key}"
+    jira_url = _jira_url(task.jira_key)
+    own_item = items.get(task.jira_key) if task.jira_key else None
 
     session = object_session(task)
     waiting = []
@@ -261,6 +399,8 @@ def _task_view(task: Task, repo: str | None) -> DashboardTask:
         issue_url=issue_url,
         jira_key=task.jira_key,
         jira_url=jira_url,
+        jira_type=own_item.type if own_item else None,
+        hierarchy=_hierarchy(task, items),
         blocked_by=waiting,
         status=task.status,
         milestone=task.milestone.code if task.milestone else None,
@@ -350,7 +490,8 @@ def build_overview(
             .limit(limit)
         )
     )
-    views = [_task_view(task, repo) for task in tasks]
+    items = {item.key: item for item in session.scalars(select(JiraItem))}
+    views = [_task_view(task, repo, items) for task in tasks]
 
     status_counts: dict[str, int] = {}
     for view in views:
@@ -401,4 +542,8 @@ def build_overview(
         ),
         milestones=milestones,
         tasks=views,
+        work_items=_work_items(
+            items, {task.jira_key: task.id for task in tasks if task.jira_key}
+        ),
+        activity=_activity(tasks),
     )
