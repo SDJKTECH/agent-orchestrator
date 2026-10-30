@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pygame
 
+from orchestrator.examples.snake_game.countdown import countdown_value
 from orchestrator.examples.snake_game.engine import (
     Direction,
     GameState,
@@ -26,6 +27,7 @@ GRID_COLOR = (40, 40, 40)
 SNAKE_COLOR = (80, 200, 120)
 HEAD_COLOR = (140, 240, 170)
 FOOD_COLOR = (230, 70, 70)
+BONUS_FOOD_COLOR = (255, 210, 50)
 OBSTACLE_COLOR = (130, 130, 150)
 TEXT_COLOR = (240, 240, 240)
 
@@ -85,6 +87,7 @@ def draw(
     font: pygame.font.Font,
     state: GameState,
     high_score: int = 0,
+    countdown: int | None = None,
 ) -> None:
     """Draw the grid, snake, food, HUD and the game-over overlay."""
     screen.fill(BACKGROUND)
@@ -109,6 +112,8 @@ def draw(
         pygame.draw.rect(screen, OBSTACLE_COLOR, cell_rect(cell))
     if state.food is not None:
         pygame.draw.rect(screen, FOOD_COLOR, cell_rect(state.food))
+    if state.bonus_food is not None:
+        pygame.draw.rect(screen, BONUS_FOOD_COLOR, cell_rect(state.bonus_food))
     for i, cell in enumerate(state.snake):
         pygame.draw.rect(screen, HEAD_COLOR if i == 0 else SNAKE_COLOR, cell_rect(cell))
 
@@ -117,6 +122,10 @@ def draw(
         f"   Best: {max(high_score, state.score)}"
     )
     screen.blit(font.render(hud, True, TEXT_COLOR), (10, 8))
+
+    if countdown is not None:
+        big_font = pygame.font.Font(None, 160)
+        _draw_centered(screen, big_font, str(countdown), screen.get_height() // 2)
 
     if state.paused and not state.game_over:
         _draw_centered(screen, font, "Paused", screen.get_height() // 2)
@@ -143,11 +152,15 @@ def run() -> None:
         state = new_game()
         level = level_for_score(state.score)
         pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
+        start_ticks = pygame.time.get_ticks()
         running = True
         while running:
+            countdown = countdown_value((pygame.time.get_ticks() - start_ticks) / 1000)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif countdown is not None:
+                    continue  # snake is frozen and input ignored during countdown
                 elif event.type == pygame.KEYDOWN:
                     state, quit_requested = handle_key(state, event.key)
                     running = running and not quit_requested
@@ -162,7 +175,7 @@ def run() -> None:
                     state.add_obstacle()
                 level = new_level
                 pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
-            draw(screen, font, state, high_score)
+            draw(screen, font, state, high_score, countdown)
             pygame.display.flip()
             clock.tick(60)
     finally:

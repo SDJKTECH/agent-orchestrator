@@ -16,14 +16,16 @@ from orchestrator.app.api.stats_routes import router as stats_router
 from orchestrator.app.api.task_routes import router as task_router
 from orchestrator.app.api.usage_routes import router as usage_router
 from orchestrator.app.api.verification_routes import router as verification_router
+from orchestrator.app.boards import make_board
 from orchestrator.app.core.config import get_settings
 from orchestrator.app.core.logging_config import setup_logging
 from orchestrator.app.dashboard.routes import router as dashboard_router
 from orchestrator.app.db.database import SessionLocal, create_tables, engine
 from orchestrator.app.db.migrations import migrate_task_columns, migrate_usage_columns
-from orchestrator.app.github.board_reporter import make_board
 from orchestrator.app.github.poller import IntakePoller
 from orchestrator.app.github.reporter import make_reporter
+from orchestrator.app.jira.poller import JiraPoller
+from orchestrator.app.jira.tracker import make_jira_tracker
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -42,11 +44,22 @@ async def lifespan(app: FastAPI):
     manager = ExecutionManager(max_workers=current.max_concurrent_agents)
     app.state.execution_manager = manager
 
-    poller: IntakePoller | None = None
+    poller: IntakePoller | JiraPoller | None = None
 
     if current.poll_interval_seconds > 0:
         if current.repository_path is None:
             logger.warning("Issue polling is enabled but repository_path is not set.")
+        elif current.issue_source == "jira":
+            poller = JiraPoller(
+                settings=current,
+                session_factory=SessionLocal,
+                manager=manager,
+                run_pipeline=lambda task_id: task_routes._run_pipeline_in_background(
+                    task_id
+                ),
+                tracker=make_jira_tracker(current),
+            )
+            poller.start()
         else:
             reporter = make_reporter(current) if current.comment_on_issues else None
             poller = IntakePoller(

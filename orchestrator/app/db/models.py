@@ -115,6 +115,10 @@ class Task(Base):
     board_column: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # Key of the Jira issue the task came from (for example "PROJ-123").
     jira_key: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # The Jira issue record (with its Story and Epic above it); see jira/models.py.
+    jira_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("jira_items.id"), nullable=True, index=True
+    )
     # Tasks that must be merged first: JSON list of {"task_id": N, "reason": "..."}.
     blocked_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -122,6 +126,7 @@ class Task(Base):
     )
 
     milestone: Mapped["Milestone"] = relationship(back_populates="tasks")
+    jira_item: Mapped["JiraItem | None"] = relationship()
     agent_runs: Mapped[list["AgentRun"]] = relationship(
         back_populates="task",
         cascade="all, delete-orphan",
@@ -182,3 +187,7 @@ class VerificationResult(Base):
     )
 
     task: Mapped["Task"] = relationship(back_populates="verification_results")
+
+
+# Registered here so create_all builds the Jira tables with the rest.
+from orchestrator.app.jira.models import JiraItem  # noqa: E402, F401

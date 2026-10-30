@@ -8,8 +8,8 @@ from orchestrator.app.core.config import Settings
 from orchestrator.app.core.exceptions import OrchestratorError
 from orchestrator.app.db.models import Task
 from orchestrator.app.github.client import GitHubApi, detect_github_repo
-from orchestrator.app.github.merged import sync_merged_tasks
-from orchestrator.app.github.projects import (
+from orchestrator.app.jira.client import JiraApi, make_jira_api
+from orchestrator.app.jira.columns import (
     BLOCKED,
     BUILDING,
     CHECKS,
@@ -21,8 +21,8 @@ from orchestrator.app.github.projects import (
     REVIEWING,
     TESTING,
 )
-from orchestrator.app.github.reporter import outcome_message
-from orchestrator.app.jira.client import JiraApi, make_jira_api
+from orchestrator.app.jira.merged import PullRequests, sync_merged_tasks
+from orchestrator.app.jira.messages import outcome_message
 from orchestrator.app.planning.dependencies import describe_blockers
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ class JiraTracker:
         self,
         api: JiraApi,
         status_map: dict[str, str] | None = None,
-        pulls: GitHubApi | None = None,
+        pulls: PullRequests | None = None,
     ) -> None:
         self.api = api
         self.status_map = DEFAULT_STATUS_MAP if status_map is None else status_map
@@ -172,11 +172,14 @@ class JiraTracker:
 
     def sync_merged(self, session: Session) -> list[int]:
         """Mark tasks whose pull request has merged as Done in Jira."""
-        return sync_merged_tasks(session, self.pulls, self.move, jira=True)
+        return sync_merged_tasks(session, self.pulls, self.move)
 
 
 def make_jira_tracker(settings: Settings) -> JiraTracker:
-    """Build the Jira tracker from the settings."""
+    """Build the Jira tracker from the settings.
+
+    Pull requests live on GitHub, so this is where the GitHub client is made.
+    """
     repo = settings.github_repo or detect_github_repo(settings.repository_path)
     token = settings.github_token.get_secret_value() if settings.github_token else None
     return JiraTracker(

@@ -1,5 +1,4 @@
 # Finds tasks whose pull request has been merged, so their cards/issues can finish.
-# Shared by the GitHub Projects board mover and the Jira tracker.
 import logging
 import re
 from collections.abc import Callable
@@ -21,13 +20,8 @@ def sync_merged_tasks(
     session: Session,
     pulls: GitHubApi | None,
     move: Callable[[Task, str], bool],
-    *,
-    jira: bool,
 ) -> list[int]:
-    """Move tasks to Done once their pull request is merged.
-
-    `jira` selects the tasks that came from Jira; the others are the GitHub ones.
-    """
+    """Move GitHub tasks (the ones not from Jira) to Done once their PR is merged."""
     if pulls is None:
         return []
 
@@ -36,7 +30,7 @@ def sync_merged_tasks(
         select(Task).where(
             Task.board_column == PR_OPEN,
             Task.pull_request_url.is_not(None),
-            Task.jira_key.is_not(None) if jira else Task.jira_key.is_(None),
+            Task.jira_key.is_(None),
         )
     )
 

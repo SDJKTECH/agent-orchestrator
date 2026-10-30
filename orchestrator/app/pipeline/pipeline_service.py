@@ -22,6 +22,7 @@ from orchestrator.app.github.projects import (
     TESTING,
 )
 from orchestrator.app.github.publisher import PullRequestPublisher
+from orchestrator.app.jira.context import describe_hierarchy
 from orchestrator.app.pipeline.project_folder import FolderRule, folder_rule
 from orchestrator.app.pipeline.stage_isolation import StageIsolation
 from orchestrator.app.vcs.git_manager import changed_paths
@@ -315,6 +316,9 @@ class PipelineService:
             "No additional description provided."
         )
         header = f"Task: {title}\n\nDescription:\n{description}\n\n"
+        parents = describe_hierarchy(task)
+        if parents:
+            header += parents + "\n"
         if rule is not None:
             header += f"Where to put files: {rule.describe()}\n\n"
         # A task that waited for others was cut from the merged origin/main, which

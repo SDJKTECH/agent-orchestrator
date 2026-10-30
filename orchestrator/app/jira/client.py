@@ -23,7 +23,12 @@ SEARCH_FIELDS = [
     "project",
     "status",
     "issuelinks",
+    "issuetype",
+    "parent",
 ]
+
+# What is read of a parent when walking up from a Task to its Story and Epic.
+ISSUE_FIELDS = "summary,description,issuetype,parent,status"
 
 
 def adf_to_text(node: Any) -> str:
@@ -148,6 +153,11 @@ class JiraApi:
         )
         issues = result.get("issues") if isinstance(result, dict) else None
         return issues if isinstance(issues, list) else []
+
+    def issue(self, key: str) -> dict | None:
+        """One issue with the fields needed to read its type, parent and text."""
+        found = self.request("GET", f"/issue/{key}?fields={ISSUE_FIELDS}")
+        return found if isinstance(found, dict) and found.get("key") else None
 
     def status_name(self, key: str) -> str | None:
         """The issue's current status name, or None if it cannot be read."""

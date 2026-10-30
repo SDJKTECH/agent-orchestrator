@@ -160,3 +160,14 @@ def test_level_up_loop_adds_one_obstacle_per_level_up_to_limit():
         level = new_level
         assert len(state.obstacles) == min(level - 1, MAX_OBSTACLES)
     assert len(state.obstacles) == MAX_OBSTACLES
+
+
+def test_obstacle_never_covers_the_bonus_food():
+    state = GameState(width=6, height=1, seed=1)
+    # Same layout as above: x=0 is the only cell an obstacle could take.
+    state.food = (4, 0)
+    state.bonus_food = (0, 0)
+    assert state.add_obstacle() is None
+    assert state.obstacles == set()
+    state.bonus_food = None
+    assert state.add_obstacle() == (0, 0)

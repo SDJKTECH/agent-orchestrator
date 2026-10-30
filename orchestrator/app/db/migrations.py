@@ -50,6 +50,7 @@ def migrate_task_columns(engine: Engine) -> None:
         "board_column": "VARCHAR(50)",
         "jira_key": "VARCHAR(50)",
         "blocked_by": "TEXT",
+        "jira_item_id": "INTEGER",
     }
 
     with engine.begin() as connection:
