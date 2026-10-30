@@ -11,11 +11,11 @@ from sqlalchemy.orm import Session
 from orchestrator.app.agents.agent_service import AgentService
 from orchestrator.app.agents.process_control import process_control
 from orchestrator.app.api.schemas import TaskCreate, TaskDetailResponse, TaskResponse
+from orchestrator.app.boards import make_board
 from orchestrator.app.core.config import get_settings
 from orchestrator.app.core.exceptions import RepositoryError
 from orchestrator.app.db.database import SessionLocal, get_db
 from orchestrator.app.db.models import Task, TaskStatus
-from orchestrator.app.github.board_reporter import make_board
 from orchestrator.app.github.publisher import make_publisher
 from orchestrator.app.github.reporter import make_reporter, outcome_message
 from orchestrator.app.pipeline.pipeline_service import PipelineService

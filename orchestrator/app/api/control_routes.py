@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from orchestrator.app.agents.process_control import process_control
 from orchestrator.app.api.schemas import AgentRunUsageResponse, ControlResponse
+from orchestrator.app.boards import make_board
 from orchestrator.app.core.config import get_settings
 from orchestrator.app.db.database import get_db
 from orchestrator.app.db.models import (
@@ -17,7 +18,6 @@ from orchestrator.app.db.models import (
     Task,
     TaskStatus,
 )
-from orchestrator.app.github.board_reporter import make_board
 from orchestrator.app.github.projects import FAILED
 
 logger = logging.getLogger(__name__)

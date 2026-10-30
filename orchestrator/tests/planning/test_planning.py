@@ -1,20 +1,16 @@
 import json
 import subprocess
-from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from orchestrator.app.agents.agent_runner import AgentExecutionResult
-from orchestrator.app.agents.execution_manager import ExecutionManager
 from orchestrator.app.core.config import Settings
 from orchestrator.app.core.exceptions import AgentExecutionError
 from orchestrator.app.db.database import Base
 from orchestrator.app.db.models import Milestone, Project, Task, TaskStatus
-from orchestrator.app.github.intake import Issue
-from orchestrator.app.github.poller import IntakePoller
-from orchestrator.app.github.projects import BLOCKED, DONE, QUEUED
+from orchestrator.app.github.projects import DONE
 from orchestrator.app.jira.client import JiraApi
 from orchestrator.app.jira.source import blockers
 from orchestrator.app.planning.dependencies import (
@@ -31,7 +27,7 @@ from orchestrator.app.planning.planner import (
     parse_plan,
 )
 from orchestrator.app.services.task_service import create_task
-from orchestrator.tests.helpers import StaticIssueSource, init_repository
+from orchestrator.tests.helpers import init_repository
 
 
 @pytest.fixture
@@ -337,50 +333,6 @@ def test_a_blocker_that_is_not_a_jira_task_does_not_hold_a_jira_task(
 
     assert released == [waiting]
     assert waiting.status == TaskStatus.QUEUED
-
-
-def test_poller_holds_a_dependent_and_runs_the_rest(tmp_path) -> None:
-    repository = tmp_path / "source"
-    init_repository(repository)
-    engine = create_engine(f"sqlite:///{(tmp_path / 'poll.db').as_posix()}")
-    Base.metadata.create_all(bind=engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    manager = ExecutionManager(max_workers=3)
-    ran: list[int] = []
-    board = MagicMock()
-    planner = MagicMock()
-    planner.plan.return_value = {"T-3": [Dependency("T-2", "uses it")]}
-    source = StaticIssueSource(
-        [
-            Issue(number=0, title=f"T-{n}: x", jira_key=f"T-{n}", board_title="P")
-            for n in (1, 2, 3)
-        ]
-    )
-    poller = IntakePoller(
-        settings=Settings(
-            _env_file=None, repository_path=repository, poll_interval_seconds=1
-        ),
-        session_factory=factory,
-        manager=manager,
-        run_pipeline=ran.append,
-        source=source,
-        board=board,
-        planner=planner,
-    )
-
-    scheduled = poller.poll_once()
-    manager.shutdown(wait=True)
-    engine.dispose()
-
-    with factory() as db:
-        tasks = {t.jira_key: t for t in db.scalars(select(Task))}
-
-    assert tasks["T-3"].status == TaskStatus.BLOCKED
-    assert sorted(scheduled) == sorted([tasks["T-1"].id, tasks["T-2"].id])
-    moves = {c.args[0].jira_key: c.args[1] for c in board.move.call_args_list}
-    assert moves == {"T-1": QUEUED, "T-2": QUEUED, "T-3": BLOCKED}
-    board.link_blocks.assert_called_once()
-    assert board.link_blocks.call_args.args[0].jira_key == "T-3"
 
 
 def test_jira_blocked_by_links_are_read() -> None:

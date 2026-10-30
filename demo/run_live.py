@@ -110,7 +110,7 @@ def preflight(args) -> tuple[str, str, GitHubApi]:
 def check_jira() -> None:
     """Read the Jira queue once, so bad credentials or JQL stop the run early."""
     try:
-        waiting = make_jira_source(Settings(_env_file=ROOT / ".env")).list_issues()
+        waiting = make_jira_source(Settings(_env_file=ROOT / ".env")).list_items()
     except OrchestratorError as exc:
         fail(f"cannot read Jira: {exc}")
 

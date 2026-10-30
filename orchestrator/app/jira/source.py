@@ -1,10 +1,10 @@
 # Reads the Jira issues waiting to be worked on and turns them into Issues.
 # The Jira key is put in the task title so branches, commits and PRs carry it.
 import logging
+from dataclasses import dataclass, field
 
 from orchestrator.app.core.config import Settings
 from orchestrator.app.core.exceptions import IssueSourceError
-from orchestrator.app.github.intake import Issue
 from orchestrator.app.jira.client import (
     JiraApi,
     adf_to_text,
@@ -13,6 +13,10 @@ from orchestrator.app.jira.client import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Epic > Story > Task needs two parents; one more level covers Sub-tasks.
+MAX_ANCESTOR_DEPTH = 3
+DEFAULT_SKIP_TYPES = frozenset({"epic", "story"})
 
 
 def build_jql(settings: Settings) -> str:
@@ -44,49 +48,157 @@ def blockers(fields: dict) -> list[str]:
     return keys
 
 
+def parse_skip_types(text: str | None) -> frozenset[str]:
+    """Issue type names from a comma-separated setting, compared case-insensitively."""
+    return frozenset(
+        part.strip().casefold() for part in (text or "").split(",") if part.strip()
+    )
+
+
+@dataclass(frozen=True)
+class JiraRecord:
+    """One Jira issue as read from Jira: its type, text and parent."""
+
+    key: str
+    type: str = ""
+    summary: str = ""
+    description: str = ""
+    status: str | None = None
+    parent_key: str | None = None
+
+
+@dataclass(frozen=True)
+class JiraWorkItem:
+    """A Jira issue to work on, with the Story and Epic above it (outermost first)."""
+
+    record: JiraRecord
+    ancestors: list[JiraRecord] = field(default_factory=list)
+    url: str = ""
+    labels: list[str] = field(default_factory=list)
+    fix_version: str | None = None
+    project_name: str | None = None
+    blocked_by: list[str] = field(default_factory=list)
+
+    @property
+    def title(self) -> str:
+        return f"{self.record.key}: {self.record.summary}"
+
+    @property
+    def body(self) -> str:
+        return (
+            f"Jira issue {self.record.key}: {self.url}\n\n{self.record.description}"
+        ).strip()
+
+
+def read_record(item: dict) -> JiraRecord | None:
+    """A JiraRecord from a Jira issue payload, or None if it has no key or summary."""
+    key = item.get("key")
+    fields = item.get("fields") or {}
+    summary = str(fields.get("summary") or "").strip()
+
+    if not isinstance(key, str) or not summary:
+        return None
+
+    kind = fields.get("issuetype") or {}
+    status = fields.get("status") or {}
+    parent = fields.get("parent") or {}
+    return JiraRecord(
+        key=key,
+        type=str(kind.get("name") or "") if isinstance(kind, dict) else "",
+        summary=summary,
+        description=adf_to_text(fields.get("description")).strip(),
+        status=status.get("name") if isinstance(status, dict) else None,
+        parent_key=parent.get("key") if isinstance(parent, dict) else None,
+    )
+
+
 class JiraIssueSource:
     """Issues of a Jira query, as work items."""
 
-    def __init__(self, api: JiraApi, jql: str, limit: int = 50) -> None:
+    def __init__(
+        self,
+        api: JiraApi,
+        jql: str,
+        limit: int = 50,
+        skip_types: frozenset[str] = DEFAULT_SKIP_TYPES,
+    ) -> None:
         self.api = api
         self.jql = jql
         self.limit = limit
+        self.skip_types = skip_types
 
-    def list_issues(self) -> list[Issue]:
-        """Search Jira with the configured JQL; return the matches as Issues."""
-        issues: list[Issue] = []
+    def list_items(self) -> list[JiraWorkItem]:
+        """Search Jira with the configured JQL; return the matches with their parents.
 
-        for item in self.api.search(self.jql, self.limit):
-            key = item.get("key")
-            fields = item.get("fields") or {}
-            summary = str(fields.get("summary") or "").strip()
+        Container types (Epic, Story by default) are left out: they are context for
+        their Tasks, not work. A parent is read from Jira once per call.
+        """
+        found: dict[str, JiraRecord | None] = {}
+        items: list[JiraWorkItem] = []
 
-            if not isinstance(key, str) or not summary:
+        for payload in self.api.search(self.jql, self.limit):
+            record = read_record(payload)
+
+            if record is None:
                 continue
 
+            if record.type.casefold() in self.skip_types:
+                logger.info("Skipping %s: a %s is not built.", record.key, record.type)
+                continue
+
+            fields = payload.get("fields") or {}
             versions = fields.get("fixVersions") or []
             project = fields.get("project") or {}
-            description = adf_to_text(fields.get("description")).strip()
-            issues.append(
-                Issue(
-                    number=0,
-                    title=f"{key}: {summary}",
-                    body=(
-                        f"Jira issue {key}: {self.api.browse_url(key)}\n\n{description}"
-                    ).strip(),
+            items.append(
+                JiraWorkItem(
+                    record=record,
+                    ancestors=self._ancestors(record, found),
+                    url=self.api.browse_url(record.key),
                     labels=[str(label) for label in fields.get("labels") or []],
-                    milestone=versions[0].get("name") if versions else None,
-                    board_title=project.get("name")
+                    fix_version=versions[0].get("name") if versions else None,
+                    project_name=project.get("name")
                     if isinstance(project, dict)
                     else None,
-                    jira_key=key,
                     blocked_by=blockers(fields),
                 )
             )
 
-        return issues
+        return items
+
+    def _ancestors(
+        self, record: JiraRecord, found: dict[str, JiraRecord | None]
+    ) -> list[JiraRecord]:
+        """The parent chain of `record`, outermost first (Epic, then Story).
+
+        Stops at the top, at a loop, or after MAX_ANCESTOR_DEPTH levels. A parent
+        Jira cannot show (deleted, no permission) ends the chain.
+        """
+        chain: list[JiraRecord] = []
+        seen = {record.key}
+        key = record.parent_key
+
+        while key and key not in seen and len(chain) < MAX_ANCESTOR_DEPTH:
+            if key not in found:
+                payload = self.api.issue(key)
+                found[key] = read_record(payload) if payload else None
+
+            parent = found[key]
+
+            if parent is None:
+                break
+
+            chain.append(parent)
+            seen.add(key)
+            key = parent.parent_key
+
+        chain.reverse()
+        return chain
 
 
 def make_jira_source(settings: Settings) -> JiraIssueSource:
     """Build the Jira issue source from the settings."""
-    return JiraIssueSource(make_jira_api(settings), build_jql(settings))
+    return JiraIssueSource(
+        make_jira_api(settings),
+        build_jql(settings),
+        skip_types=parse_skip_types(settings.jira_skip_types),
+    )

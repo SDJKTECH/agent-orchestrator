@@ -17,7 +17,6 @@ from orchestrator.app.github.projects import (
     board_numbers,
     make_projects_apis,
 )
-from orchestrator.app.jira.tracker import make_jira_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +89,7 @@ class BoardMover:
 
     def sync_merged(self, session: Session) -> list[int]:
         """Move cards to Done once their pull request has been merged."""
-        return sync_merged_tasks(session, self.pulls, self.move, jira=False)
-
-    def link_blocks(self, blocked: Task, blocker: Task) -> bool:
-        """GitHub boards have no dependency links; nothing to record."""
-        return False
+        return sync_merged_tasks(session, self.pulls, self.move)
 
 
 class TaskBoard(Protocol):
@@ -104,14 +99,9 @@ class TaskBoard(Protocol):
 
     def sync_merged(self, session: Session) -> list[int]: ...
 
-    def link_blocks(self, blocked: Task, blocker: Task) -> bool: ...
-
 
 def make_board(settings: Settings) -> TaskBoard | None:
-    """Create the card mover (or Jira tracker), or None when none is configured."""
-    if settings.issue_source == "jira":
-        return make_jira_tracker(settings)
-
+    """Create the card mover, or None when no board is configured."""
     try:
         explicit = bool(board_numbers(settings))
     except OrchestratorError:

@@ -172,8 +172,9 @@ class SyncResponse(BaseModel):
     """Result of importing issues: imported, skipped and failed."""
 
     imported: list[TaskResponse]
-    skipped_issue_numbers: list[int]
-    failed: dict[int, str]
+    # GitHub issue numbers, or Jira keys such as "SG-3".
+    skipped_issue_numbers: list[int | str]
+    failed: dict[int | str, str]
 
 
 class ControlResponse(BaseModel):

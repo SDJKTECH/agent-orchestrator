@@ -20,6 +20,7 @@ def create_task(
     project_item_id: str | None = None,
     board_number: int | None = None,
     jira_key: str | None = None,
+    jira_item_id: int | None = None,
 ) -> Task:
     """Create a queued task and prepare its dedicated Git worktree."""
     if not title.strip():
@@ -47,6 +48,7 @@ def create_task(
         project_item_id=project_item_id,
         board_number=board_number,
         jira_key=jira_key,
+        jira_item_id=jira_item_id,
     )
     session.add(task)
     session.flush()

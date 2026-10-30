@@ -16,6 +16,7 @@ from orchestrator.app.agents.model_router import ModelRouter
 from orchestrator.app.core.config import Settings
 from orchestrator.app.core.exceptions import OrchestratorError
 from orchestrator.app.db.models import Task
+from orchestrator.app.jira.context import summarize_hierarchy
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ def build_prompt(tasks: list[Task]) -> str:
     """The message that asks the planner agent which tasks depend on which."""
     items = "\n\n".join(
         f"[{task_label(task)}] {task.title}\n"
+        + (f"Belongs to: {parents}\n" if (parents := summarize_hierarchy(task)) else "")
         + (
             (task.description or "").strip()[:MAX_DESCRIPTION_CHARS]
             or "(no description)"
@@ -69,8 +71,9 @@ def build_prompt(tasks: list[Task]) -> str:
         "touch the same area, or can be built in any order, are independent. Be "
         "conservative: when unsure, treat them as independent. But a task whose "
         "text says it builds on, uses or extends another task's module, file or "
-        "feature (for example by naming that task) does depend on it. Never "
-        "output a cycle.\n\n"
+        "feature (for example by naming that task) does depend on it. Tasks that "
+        "share a parent Story or Epic (a 'Belongs to' line) are related by topic; "
+        "that alone is not a dependency. Never output a cycle.\n\n"
         "Tasks:\n\n"
         + items
         + "\n\nReply with only a JSON object mapping each dependent task to what it "

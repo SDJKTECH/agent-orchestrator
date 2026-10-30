@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     jira_project: str | None = None  # project key, e.g. "PROJ"
     jira_trigger_status: str = "To Do"
     jira_jql: str | None = None  # overrides jira_project and jira_trigger_status
+    # Issue types that are only containers: they give their Tasks context, but are
+    # not built themselves. Comma-separated; empty picks up every type.
+    jira_skip_types: str = "Epic,Story"
     # Overrides of the default board-column -> Jira status map, for example
     # "Building=In Progress,PR open=In Review,Failed=Blocked". "-" means no move.
     jira_status_map: str | None = None

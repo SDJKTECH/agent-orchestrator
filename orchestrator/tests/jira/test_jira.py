@@ -1,17 +1,14 @@
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from orchestrator.app.agents.execution_manager import ExecutionManager
+from orchestrator.app.boards import make_board
 from orchestrator.app.core.config import Settings
 from orchestrator.app.core.exceptions import IssueSourceError
 from orchestrator.app.db.database import Base
 from orchestrator.app.db.models import Milestone, Project, Task, TaskStatus
-from orchestrator.app.github.board_reporter import make_board
-from orchestrator.app.github.intake import Issue, build_issue_source
-from orchestrator.app.github.poller import IntakePoller
 from orchestrator.app.github.projects import (
     BUILDING,
     DONE,
@@ -28,13 +25,17 @@ from orchestrator.app.jira.client import (
     quote_jql,
     text_to_adf,
 )
-from orchestrator.app.jira.source import JiraIssueSource, build_jql
+from orchestrator.app.jira.source import (
+    JiraIssueSource,
+    build_jql,
+    make_jira_source,
+    parse_skip_types,
+)
 from orchestrator.app.jira.tracker import (
     DEFAULT_STATUS_MAP,
     JiraTracker,
     parse_status_map,
 )
-from orchestrator.tests.helpers import StaticIssueSource, init_repository
 
 DESCRIPTION = {
     "type": "doc",
@@ -61,8 +62,11 @@ DESCRIPTION = {
 class FakeJira:
     """A transport that records calls and answers like Jira."""
 
-    def __init__(self, status="To Do", transitions=None, search=None, fail=False):
+    def __init__(
+        self, status="To Do", transitions=None, search=None, fail=False, issues=None
+    ):
         self.status = status
+        self.issues = issues or {}
         self.available = (
             [{"id": "11", "name": "Start", "to": {"name": "In Progress"}}]
             if transitions is None
@@ -80,6 +84,9 @@ class FakeJira:
 
         if path.startswith("/search/jql"):
             return {"issues": self.found}
+
+        if path.startswith("/issue/") and "?fields=summary" in path:
+            return self.issues.get(path.split("?")[0].removeprefix("/issue/"))
 
         if path.endswith("?fields=status"):
             return {"fields": {"status": {"name": self.status}}}
@@ -168,17 +175,173 @@ def test_source_turns_jira_issues_into_work_items() -> None:
     )
     api = JiraApi("https://x.atlassian.net/", "me", "tok", fake)
 
-    issues = JiraIssueSource(api, "project = PROJ").list_issues()
+    items = JiraIssueSource(api, "project = PROJ").list_items()
 
-    assert len(issues) == 1
-    issue = issues[0]
-    assert issue.jira_key == "PROJ-5"
-    assert issue.title == "PROJ-5: Parse CSV"
-    assert "https://x.atlassian.net/browse/PROJ-5" in issue.body
-    assert "- handle quotes" in issue.body
-    assert issue.milestone == "M1 - Core"
-    assert issue.board_title == "CSV Summariser"
+    assert len(items) == 1
+    item = items[0]
+    assert item.record.key == "PROJ-5"
+    assert item.title == "PROJ-5: Parse CSV"
+    assert "https://x.atlassian.net/browse/PROJ-5" in item.body
+    assert "- handle quotes" in item.body
+    assert item.labels == ["backend"]
+    assert item.fix_version == "M1 - Core"
+    assert item.project_name == "CSV Summariser"
     assert fake.calls[0][2]["jql"] == "project = PROJ"
+
+
+def hit(key, kind, parent=None, description=None):
+    """A Jira issue payload, as search and GET /issue return it."""
+    fields = {"summary": f"{key} summary", "issuetype": {"name": kind}}
+
+    if parent:
+        fields["parent"] = {"key": parent}
+
+    if description:
+        fields["description"] = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": description}],
+                }
+            ],
+        }
+
+    return {"key": key, "fields": fields}
+
+
+def source_for(fake, **kwargs) -> JiraIssueSource:
+    api = JiraApi("https://x.atlassian.net", "me", "tok", fake)
+    return JiraIssueSource(api, "project = SG", **kwargs)
+
+
+def test_search_asks_for_type_and_parent() -> None:
+    fake = FakeJira()
+    source_for(fake).list_items()
+
+    assert {"issuetype", "parent"} <= set(fake.calls[0][2]["fields"])
+
+
+def test_a_task_gets_its_story_and_epic_outermost_first() -> None:
+    fake = FakeJira(
+        search=[hit("SG-3", "Task", parent="SG-2")],
+        issues={
+            "SG-2": hit("SG-2", "Story", parent="SG-1", description="Obstacles"),
+            "SG-1": hit("SG-1", "Epic", description="The snake game"),
+        },
+    )
+
+    [item] = source_for(fake).list_items()
+
+    assert [(a.key, a.type) for a in item.ancestors] == [
+        ("SG-1", "Epic"),
+        ("SG-2", "Story"),
+    ]
+    assert item.ancestors[0].description == "The snake game"
+    assert item.ancestors[1].parent_key == "SG-1"
+    assert item.record.parent_key == "SG-2"
+
+
+def test_a_task_without_a_parent_has_no_ancestors_and_no_lookup() -> None:
+    fake = FakeJira(search=[hit("SG-3", "Task")])
+
+    [item] = source_for(fake).list_items()
+
+    assert item.ancestors == []
+    assert fake.paths("GET") == []
+
+
+def test_a_task_directly_under_an_epic_has_one_ancestor() -> None:
+    fake = FakeJira(
+        search=[hit("SG-3", "Task", parent="SG-1")],
+        issues={"SG-1": hit("SG-1", "Epic")},
+    )
+
+    [item] = source_for(fake).list_items()
+
+    assert [a.key for a in item.ancestors] == ["SG-1"]
+
+
+def test_each_parent_is_read_once_per_search() -> None:
+    fake = FakeJira(
+        search=[hit("SG-3", "Task", parent="SG-2"), hit("SG-4", "Task", parent="SG-2")],
+        issues={"SG-2": hit("SG-2", "Story")},
+    )
+
+    items = source_for(fake).list_items()
+
+    assert len(items) == 2
+    assert len(fake.paths("GET")) == 1
+
+
+def test_epics_and_stories_are_not_built() -> None:
+    fake = FakeJira(
+        search=[
+            hit("SG-1", "Epic"),
+            hit("SG-2", "Story", parent="SG-1"),
+            hit("SG-3", "Task", parent="SG-2"),
+            hit("SG-4", "Bug"),
+        ],
+        issues={"SG-2": hit("SG-2", "Story"), "SG-1": hit("SG-1", "Epic")},
+    )
+
+    assert [i.record.key for i in source_for(fake).list_items()] == ["SG-3", "SG-4"]
+
+
+def test_the_skipped_types_can_be_changed() -> None:
+    fake = FakeJira(search=[hit("SG-2", "Story"), hit("SG-3", "Task")])
+
+    only_epics = source_for(fake, skip_types=parse_skip_types("epic")).list_items()
+    nothing = source_for(fake, skip_types=parse_skip_types("")).list_items()
+
+    assert [i.record.key for i in only_epics] == ["SG-2", "SG-3"]
+    assert len(nothing) == 2
+    assert parse_skip_types(" Epic, story ,") == {"epic", "story"}
+
+
+def test_an_unreadable_parent_ends_the_chain() -> None:
+    fake = FakeJira(
+        search=[hit("SG-3", "Task", parent="SG-2")],
+        issues={"SG-2": hit("SG-2", "Story", parent="SG-1")},
+    )
+
+    [item] = source_for(fake).list_items()
+
+    assert [a.key for a in item.ancestors] == ["SG-2"]
+
+
+def test_a_parent_loop_and_deep_chains_are_cut_off() -> None:
+    loop = FakeJira(
+        search=[hit("SG-3", "Task", parent="SG-2")],
+        issues={
+            "SG-2": hit("SG-2", "Story", parent="SG-3"),
+        },
+    )
+    deep = FakeJira(
+        search=[hit("K0", "Task", parent="K1")],
+        issues={
+            f"K{n}": hit(f"K{n}", "Story", parent=f"K{n + 1}") for n in range(1, 9)
+        },
+    )
+
+    [looped] = source_for(loop).list_items()
+    [chain] = source_for(deep).list_items()
+
+    assert [a.key for a in looped.ancestors] == ["SG-2"]
+    assert len(chain.ancestors) == 3
+
+
+def test_a_jira_failure_while_reading_a_parent_is_raised() -> None:
+    class Flaky(FakeJira):
+        def __call__(self, method, path, body):
+            if method == "GET":
+                raise IssueSourceError("Jira is unreachable")
+            return super().__call__(method, path, body)
+
+    fake = Flaky(search=[hit("SG-3", "Task", parent="SG-2")])
+
+    with pytest.raises(IssueSourceError):
+        source_for(fake).list_items()
 
 
 def test_status_map_defaults_and_overrides() -> None:
@@ -316,54 +479,6 @@ def test_merged_pull_requests_finish_the_jira_issue() -> None:
         assert "/issue/PROJ-1/transitions" in fake.paths("POST")
 
 
-def test_poller_imports_a_jira_issue_once_and_tells_jira(tmp_path) -> None:
-    repository = tmp_path / "source"
-    init_repository(repository)
-    engine = create_engine(f"sqlite:///{(tmp_path / 'jira.db').as_posix()}")
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-    manager = ExecutionManager(max_workers=1)
-    ran: list[int] = []
-    board = MagicMock()
-    source = StaticIssueSource(
-        [
-            Issue(
-                number=0,
-                title="PROJ-9: Add stats",
-                body="Do it",
-                jira_key="PROJ-9",
-                board_title="CSV Summariser",
-            )
-        ]
-    )
-    poller = IntakePoller(
-        settings=Settings(
-            _env_file=None, repository_path=repository, poll_interval_seconds=1
-        ),
-        session_factory=session_factory,
-        manager=manager,
-        run_pipeline=ran.append,
-        source=source,
-        board=board,
-    )
-
-    poller.poll_once()
-    poller.poll_once()
-    manager.shutdown(wait=True)
-    engine.dispose()
-
-    with session_factory() as session:
-        tasks = session.scalars(select(Task)).all()
-        assert len(tasks) == 1
-        assert tasks[0].jira_key == "PROJ-9"
-        assert tasks[0].github_issue_number is None
-        assert tasks[0].status == TaskStatus.QUEUED
-        assert tasks[0].milestone.project.name == "CSV Summariser"
-
-    board.move.assert_called_once()
-    assert board.move.call_args.args[1] == QUEUED
-
-
 def test_jira_settings_select_the_source_and_the_tracker() -> None:
     settings = Settings(
         _env_file=None,
@@ -374,7 +489,7 @@ def test_jira_settings_select_the_source_and_the_tracker() -> None:
         jira_project="PROJ",
     )
 
-    assert isinstance(build_issue_source(settings), JiraIssueSource)
+    assert isinstance(make_jira_source(settings), JiraIssueSource)
     assert isinstance(make_board(settings), JiraTracker)
 
 
