@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 
 from orchestrator.app.core.config import Settings
-from orchestrator.app.core.exceptions import IssueSourceError
+from orchestrator.app.core.exceptions import IssueSourceError, OrchestratorError
 from orchestrator.app.jira.client import (
     JiraApi,
     adf_to_text,
@@ -65,6 +65,8 @@ class JiraRecord:
     description: str = ""
     status: str | None = None
     parent_key: str | None = None
+    # How many Subtasks the issue has; an issue with some is a container.
+    subtask_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,7 @@ def read_record(item: dict) -> JiraRecord | None:
     kind = fields.get("issuetype") or {}
     status = fields.get("status") or {}
     parent = fields.get("parent") or {}
+    subtasks = fields.get("subtasks")
     return JiraRecord(
         key=key,
         type=str(kind.get("name") or "") if isinstance(kind, dict) else "",
@@ -109,6 +112,7 @@ def read_record(item: dict) -> JiraRecord | None:
         description=adf_to_text(fields.get("description")).strip(),
         status=status.get("name") if isinstance(status, dict) else None,
         parent_key=parent.get("key") if isinstance(parent, dict) else None,
+        subtask_count=len(subtasks) if isinstance(subtasks, list) else 0,
     )
 
 
@@ -121,17 +125,21 @@ class JiraIssueSource:
         jql: str,
         limit: int = 50,
         skip_types: frozenset[str] = DEFAULT_SKIP_TYPES,
+        skip_with_subtasks: bool = True,
     ) -> None:
         self.api = api
         self.jql = jql
         self.limit = limit
         self.skip_types = skip_types
+        self.skip_with_subtasks = skip_with_subtasks
 
     def list_items(self) -> list[JiraWorkItem]:
         """Search Jira with the configured JQL; return the matches with their parents.
 
         Container types (Epic, Story by default) are left out: they are context for
-        their Tasks, not work. A parent is read from Jira once per call.
+        their Tasks, not work. So is any issue that has Subtasks, whatever its type is
+        called, which keeps a misspelt JIRA_SKIP_TYPES from building a Story. A parent
+        is read from Jira once per call.
         """
         found: dict[str, JiraRecord | None] = {}
         items: list[JiraWorkItem] = []
@@ -143,7 +151,15 @@ class JiraIssueSource:
                 continue
 
             if record.type.casefold() in self.skip_types:
-                logger.info("Skipping %s: a %s is not built.", record.key, record.type)
+                logger.debug("Skipping %s: a %s is not built.", record.key, record.type)
+                continue
+
+            if self.skip_with_subtasks and record.subtask_count:
+                logger.debug(
+                    "Skipping %s: its %d Subtask(s) are built instead.",
+                    record.key,
+                    record.subtask_count,
+                )
                 continue
 
             fields = payload.get("fields") or {}
@@ -201,4 +217,34 @@ def make_jira_source(settings: Settings) -> JiraIssueSource:
         make_jira_api(settings),
         build_jql(settings),
         skip_types=parse_skip_types(settings.jira_skip_types),
+        skip_with_subtasks=settings.jira_skip_with_subtasks,
     )
+
+
+def check_skip_types(settings: Settings, api: JiraApi | None = None) -> None:
+    """Say what is skipped, and warn about a skip type that names no Jira issue type.
+
+    Meant for start-up. It never raises: if Jira cannot be asked, it only logs.
+    """
+    skip = parse_skip_types(settings.jira_skip_types)
+    logger.info(
+        "Jira issues not built: types %s%s.",
+        ", ".join(sorted(skip)) or "(none)",
+        " and any issue that has Subtasks" if settings.jira_skip_with_subtasks else "",
+    )
+
+    try:
+        known = (api or make_jira_api(settings)).issue_type_names()
+    except OrchestratorError as exc:
+        logger.info("Could not check JIRA_SKIP_TYPES against Jira: %s", exc)
+        return
+
+    unknown = sorted(skip - {name.casefold() for name in known})
+
+    if known and unknown:
+        logger.warning(
+            "JIRA_SKIP_TYPES names no Jira issue type: %s. Check the spelling; "
+            "Jira has: %s.",
+            ", ".join(unknown),
+            ", ".join(sorted(known)),
+        )

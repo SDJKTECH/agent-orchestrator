@@ -159,3 +159,24 @@ def test_the_jira_columns_match_the_ones_the_pipeline_sends() -> None:
 def test_the_jira_poller_does_not_use_the_github_package() -> None:
     assert "app.github" not in inspect.getsource(poller)
     assert "app.github" not in inspect.getsource(columns)
+
+
+def test_starting_the_poller_checks_the_skip_types(tmp_path, monkeypatch) -> None:
+    seen = []
+    monkeypatch.setattr(poller, "check_skip_types", seen.append)
+    monkeypatch.setattr(JiraPoller, "_loop", lambda self: None)
+    settings = Settings(
+        _env_file=None, repository_path=tmp_path, poll_interval_seconds=1
+    )
+    jira_poller = JiraPoller(
+        settings=settings,
+        session_factory=MagicMock(),
+        manager=MagicMock(),
+        run_pipeline=lambda task_id: None,
+        tracker=MagicMock(),
+    )
+
+    jira_poller.start()
+    jira_poller.stop()
+
+    assert seen == [settings]

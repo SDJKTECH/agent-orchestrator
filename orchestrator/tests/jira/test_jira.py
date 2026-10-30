@@ -63,10 +63,17 @@ class FakeJira:
     """A transport that records calls and answers like Jira."""
 
     def __init__(
-        self, status="To Do", transitions=None, search=None, fail=False, issues=None
+        self,
+        status="To Do",
+        transitions=None,
+        search=None,
+        fail=False,
+        issues=None,
+        types=None,
     ):
         self.status = status
         self.issues = issues or {}
+        self.types = types
         self.available = (
             [{"id": "11", "name": "Start", "to": {"name": "In Progress"}}]
             if transitions is None
@@ -84,6 +91,9 @@ class FakeJira:
 
         if path.startswith("/search/jql"):
             return {"issues": self.found}
+
+        if path == "/issuetype":
+            return self.types
 
         if path.startswith("/issue/") and "?fields=summary" in path:
             return self.issues.get(path.split("?")[0].removeprefix("/issue/"))
@@ -189,9 +199,12 @@ def test_source_turns_jira_issues_into_work_items() -> None:
     assert fake.calls[0][2]["jql"] == "project = PROJ"
 
 
-def hit(key, kind, parent=None, description=None):
+def hit(key, kind, parent=None, description=None, subtasks=None):
     """A Jira issue payload, as search and GET /issue return it."""
     fields = {"summary": f"{key} summary", "issuetype": {"name": kind}}
+
+    if subtasks is not None:
+        fields["subtasks"] = [{"key": subtask} for subtask in subtasks]
 
     if parent:
         fields["parent"] = {"key": parent}
@@ -501,3 +514,132 @@ def test_pull_request_body_links_the_jira_issue(monkeypatch) -> None:
     task = jira_task(branch_name="agent/task-7")
 
     assert "Jira: https://x.atlassian.net/browse/PROJ-1" in pull_request_body(task)
+
+
+def test_search_asks_for_subtasks() -> None:
+    fake = FakeJira()
+    source_for(fake).list_items()
+
+    assert "subtasks" in fake.calls[0][2]["fields"]
+
+
+def test_an_issue_with_subtasks_is_a_container_even_if_its_type_is_misspelt() -> None:
+    # The skip list has a typo ("sto"), as it once did in a real .env.
+    fake = FakeJira(
+        search=[
+            hit("SG-9", "Story", subtasks=["SG-11", "SG-12"]),
+            hit("SG-11", "Subtask", parent="SG-9"),
+        ],
+        issues={"SG-9": hit("SG-9", "Story")},
+    )
+
+    items = source_for(fake, skip_types=parse_skip_types("epic,sto")).list_items()
+
+    assert [item.record.key for item in items] == ["SG-11"]
+
+
+def test_a_plain_task_without_subtasks_is_still_built() -> None:
+    fake = FakeJira(search=[hit("SG-20", "Task", subtasks=[])])
+
+    items = source_for(fake, skip_types=parse_skip_types("epic,sto")).list_items()
+
+    assert [item.record.key for item in items] == ["SG-20"]
+
+
+def test_the_subtask_rule_can_be_turned_off() -> None:
+    fake = FakeJira(search=[hit("SG-9", "Story", subtasks=["SG-11"])])
+
+    items = source_for(
+        fake, skip_types=parse_skip_types(""), skip_with_subtasks=False
+    ).list_items()
+
+    assert [item.record.key for item in items] == ["SG-9"]
+
+
+def test_records_remember_how_many_subtasks_an_issue_has() -> None:
+    from orchestrator.app.jira.source import read_record
+
+    assert read_record(hit("A-1", "Story", subtasks=["A-2", "A-3"])).subtask_count == 2
+    assert read_record(hit("A-1", "Task")).subtask_count == 0
+    assert (
+        read_record(
+            {"key": "A-1", "fields": {"summary": "x", "subtasks": None}}
+        ).subtask_count
+        == 0
+    )
+
+
+def test_skip_rule_settings_default_to_the_safe_choice() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.jira_skip_types == "Epic,Story"
+    assert settings.jira_skip_with_subtasks is True
+    assert (
+        Settings(_env_file=None, jira_skip_with_subtasks=False).jira_skip_with_subtasks
+        is False
+    )
+
+
+REAL_TYPES = [{"name": name} for name in ("Epic", "Story", "Task", "Bug", "Subtask")]
+
+
+def test_issue_type_names_come_from_jira() -> None:
+    api = JiraApi("https://x.atlassian.net", "me", "tok", FakeJira(types=REAL_TYPES))
+
+    assert api.issue_type_names() == {"Epic", "Story", "Task", "Bug", "Subtask"}
+    assert (
+        JiraApi("https://x.atlassian.net", "me", "tok", FakeJira()).issue_type_names()
+        == set()
+    )
+
+
+def test_start_up_check_warns_about_a_skip_type_that_does_not_exist(caplog) -> None:
+    from orchestrator.app.jira.source import check_skip_types
+
+    api = JiraApi("https://x.atlassian.net", "me", "tok", FakeJira(types=REAL_TYPES))
+    settings = Settings(_env_file=None, jira_skip_types="Epic,Sto")
+
+    with caplog.at_level("INFO", logger="orchestrator.app.jira.source"):
+        check_skip_types(settings, api)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "sto" in warnings[0] and "Story" in warnings[0]
+    assert any(
+        "epic, sto" in r.getMessage() for r in caplog.records if r.levelname == "INFO"
+    )
+
+
+def test_start_up_check_is_quiet_when_the_skip_types_are_right(caplog) -> None:
+    from orchestrator.app.jira.source import check_skip_types
+
+    api = JiraApi("https://x.atlassian.net", "me", "tok", FakeJira(types=REAL_TYPES))
+
+    with caplog.at_level("INFO", logger="orchestrator.app.jira.source"):
+        check_skip_types(Settings(_env_file=None, jira_skip_types="epic, STORY"), api)
+
+    assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+    assert "any issue that has Subtasks" in caplog.text
+
+
+def test_start_up_check_never_raises_when_jira_is_down(caplog) -> None:
+    from orchestrator.app.jira.source import check_skip_types
+
+    api = JiraApi("https://x.atlassian.net", "me", "tok", FakeJira(fail=True))
+
+    with caplog.at_level("INFO", logger="orchestrator.app.jira.source"):
+        check_skip_types(Settings(_env_file=None, jira_skip_types="Epic,Sto"), api)
+
+    assert "Could not check JIRA_SKIP_TYPES" in caplog.text
+    assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+
+
+def test_start_up_check_stays_quiet_if_the_type_list_cannot_be_read(caplog) -> None:
+    from orchestrator.app.jira.source import check_skip_types
+
+    api = JiraApi("https://x.atlassian.net", "me", "tok", FakeJira())
+
+    with caplog.at_level("INFO", logger="orchestrator.app.jira.source"):
+        check_skip_types(Settings(_env_file=None, jira_skip_types="Sto"), api)
+
+    assert [r for r in caplog.records if r.levelname == "WARNING"] == []

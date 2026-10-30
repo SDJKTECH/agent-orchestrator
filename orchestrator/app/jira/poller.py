@@ -19,7 +19,7 @@ from orchestrator.app.jira.importer import (
     default_milestone,
     sync_jira_items,
 )
-from orchestrator.app.jira.source import make_jira_source
+from orchestrator.app.jira.source import check_skip_types, make_jira_source
 from orchestrator.app.planning.dependencies import (
     Edge,
     assign_blockers,
@@ -72,6 +72,7 @@ class JiraPoller:
 
     def start(self) -> None:
         """Start the background polling thread."""
+        check_skip_types(self.settings)
         self._thread = threading.Thread(
             target=self._loop, name="jira-poller", daemon=True
         )

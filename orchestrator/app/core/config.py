@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # Issue types that are only containers: they give their Tasks context, but are
     # not built themselves. Comma-separated; empty picks up every type.
     jira_skip_types: str = "Epic,Story"
+    # Also skip any issue that has Subtasks, whatever its type is called: it is a
+    # container and its Subtasks are built instead. This holds even if
+    # jira_skip_types is misspelt.
+    jira_skip_with_subtasks: bool = True
     # Overrides of the default board-column -> Jira status map, for example
     # "Building=In Progress,PR open=In Review,Failed=Blocked". "-" means no move.
     jira_status_map: str | None = None

@@ -25,6 +25,7 @@ SEARCH_FIELDS = [
     "issuelinks",
     "issuetype",
     "parent",
+    "subtasks",
 ]
 
 # What is read of a parent when walking up from a Task to its Story and Epic.
@@ -158,6 +159,19 @@ class JiraApi:
         """One issue with the fields needed to read its type, parent and text."""
         found = self.request("GET", f"/issue/{key}?fields={ISSUE_FIELDS}")
         return found if isinstance(found, dict) and found.get("key") else None
+
+    def issue_type_names(self) -> set[str]:
+        """The names of the issue types this account can see (empty if unreadable)."""
+        result = self.request("GET", "/issuetype")
+
+        if not isinstance(result, list):
+            return set()
+
+        return {
+            str(item["name"])
+            for item in result
+            if isinstance(item, dict) and item.get("name")
+        }
 
     def status_name(self, key: str) -> str | None:
         """The issue's current status name, or None if it cannot be read."""
