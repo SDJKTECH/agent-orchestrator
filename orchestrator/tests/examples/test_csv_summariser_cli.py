@@ -186,3 +186,96 @@ def test_format_summary_date_block_omits_numeric_statistics():
     assert "mean" not in text
     assert "median" not in text
     assert "distinct" not in text
+
+
+# --- main: --where filtering -------------------------------------------------
+
+_PEOPLE = "name,age,city\nann,25,Paris\nbob,35,Paris\ncy,40,Rome\ndee,31,Rome\n"
+
+
+def test_where_single_filter_limits_statistics_and_reports_kept(tmp_path, capsys):
+    path = _write(tmp_path, _PEOPLE)
+
+    assert main([str(path), "--where", "age>30"]) == 0
+
+    captured = capsys.readouterr()
+    assert "Kept 3 of 4 rows" in captured.err
+    assert "Kept" not in captured.out
+    assert "age [integer]\n  count: 3\n  missing: 0\n" in captured.out
+    assert "  min: 31\n  max: 40\n" in captured.out
+
+
+def test_where_multiple_filters_are_anded(tmp_path, capsys):
+    path = _write(tmp_path, _PEOPLE)
+
+    code = main([str(path), "--where", "age>30", "--where", "city=Rome"])
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Kept 2 of 4 rows" in captured.err
+    assert "age [integer]\n  count: 2\n" in captured.out
+    assert "  min: 31\n  max: 40\n" in captured.out
+    assert "'Paris'" not in captured.out
+
+
+def test_where_matching_no_rows_keeps_zero(tmp_path, capsys):
+    path = _write(tmp_path, _PEOPLE)
+
+    assert main([str(path), "--where", "age>100"]) == 0
+
+    captured = capsys.readouterr()
+    assert "Kept 0 of 4 rows" in captured.err
+    assert "age [text]\n  count: 0\n" in captured.out
+
+
+def test_without_where_no_kept_message(tmp_path, capsys):
+    path = _write(tmp_path, _PEOPLE)
+
+    assert main([str(path)]) == 0
+
+    assert "Kept" not in capsys.readouterr().err
+
+
+def test_where_invalid_condition_exits_with_code_2(tmp_path, capsys):
+    path = _write(tmp_path, _PEOPLE)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(path), "--where", "nonsense"])
+
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "Malformed condition 'nonsense'" in captured.err
+    assert captured.out == ""
+
+
+def test_where_unknown_column_exits_with_code_2(tmp_path, capsys):
+    path = _write(tmp_path, _PEOPLE)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(path), "--where", "height>3"])
+
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "Unknown column 'height'" in captured.err
+    assert captured.out == ""
+
+
+def test_where_pads_short_rows(tmp_path, capsys):
+    path = _write(tmp_path, "a,b\n1\n2,x\n")
+
+    assert main([str(path), "--where", "b=x"]) == 0
+
+    captured = capsys.readouterr()
+    assert "Kept 1 of 2 rows" in captured.err
+    assert "a [integer]\n  count: 1\n" in captured.out
+
+
+def test_build_parser_collects_repeated_where(tmp_path):
+    args = build_parser().parse_args(
+        [str(tmp_path / "f.csv"), "--where", "a>1", "--where", "b=x"]
+    )
+
+    assert [(c.column, c.operator, c.value) for c in args.where] == [
+        ("a", ">", "1"),
+        ("b", "=", "x"),
+    ]
