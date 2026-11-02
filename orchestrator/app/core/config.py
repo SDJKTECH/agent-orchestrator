@@ -106,6 +106,13 @@ class Settings(BaseSettings):
     jira_epic_type: str = "Epic"
     jira_story_type: str = "Story"
     jira_subtask_type: str = "Subtask"
+    # Plan GitHub issues that carry requirement_label into Jira Epics, Stories and
+    # Subtasks automatically (needs GITHUB_REPO, the Jira settings and polling on).
+    # Off by default: each requirement costs a planner run and creates Jira issues.
+    plan_requirements: bool = False
+    requirement_label: str = "requirement"
+    # Added to a requirement issue once it is planned; empty adds nothing.
+    requirement_planned_label: str = "planned"
     # How much the planner may split one requirement.
     requirement_max_stories: int = Field(default=8, ge=1)
     requirement_max_subtasks: int = Field(default=8, ge=1)

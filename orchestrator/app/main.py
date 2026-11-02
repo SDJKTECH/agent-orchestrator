@@ -31,6 +31,10 @@ from orchestrator.app.github.poller import IntakePoller
 from orchestrator.app.github.reporter import make_reporter
 from orchestrator.app.jira.poller import JiraPoller
 from orchestrator.app.jira.tracker import make_jira_tracker
+from orchestrator.app.planning.requirement_intake import (
+    RequirementIntake,
+    make_requirement_intake,
+)
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -80,10 +84,24 @@ async def lifespan(app: FastAPI):
             )
             poller.start()
 
+    intake: RequirementIntake | None = None
+
+    if (
+        current.plan_requirements
+        and current.poll_interval_seconds > 0
+        and current.repository_path is not None
+    ):
+        intake = make_requirement_intake(current, SessionLocal)
+
+        if intake is not None:
+            intake.start()
+
     try:
         yield
     finally:
         logger.info("Application shutdown")
+        if intake is not None:
+            intake.stop()
         if poller is not None:
             poller.stop()
         manager.shutdown(wait=True)
