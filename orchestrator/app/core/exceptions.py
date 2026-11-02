@@ -20,5 +20,9 @@ class VerificationError(OrchestratorError):
     """Raised when a verification operation fails."""
 
 
+class PlanningError(OrchestratorError):
+    """Raised when a requirement cannot be turned into Jira issues."""
+
+
 class IssueSourceError(OrchestratorError):
     """Raised when GitHub issues cannot be retrieved."""

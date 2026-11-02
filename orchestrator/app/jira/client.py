@@ -28,6 +28,9 @@ SEARCH_FIELDS = [
     "subtasks",
 ]
 
+# Jira rejects a summary longer than this.
+MAX_SUMMARY_CHARS = 255
+
 # What is read of a parent when walking up from a Task to its Story and Epic.
 ISSUE_FIELDS = "summary,description,issuetype,parent,status"
 
@@ -206,6 +209,37 @@ class JiraApi:
                 "outwardIssue": {"key": blocked},
             },
         )
+
+    def create_issue(
+        self,
+        project: str,
+        issue_type: str,
+        summary: str,
+        description: str,
+        parent: str | None = None,
+    ) -> str:
+        """Create an issue (under `parent`, if given) and return its key."""
+        fields: dict = {
+            "project": {"key": project},
+            "issuetype": {"name": issue_type},
+            "summary": summary[:MAX_SUMMARY_CHARS],
+            "description": text_to_adf(description or summary),
+        }
+
+        if parent:
+            fields["parent"] = {"key": parent}
+
+        created = self.request("POST", "/issue", {"fields": fields})
+        key = created.get("key") if isinstance(created, dict) else None
+
+        if not key:
+            raise IssueSourceError(f"Jira did not return a key for '{summary}'.")
+
+        return str(key)
+
+    def delete_issue(self, key: str) -> None:
+        """Delete an issue and its Subtasks (used to undo a half-made plan)."""
+        self.request("DELETE", f"/issue/{key}?deleteSubtasks=true")
 
     def comment(self, key: str, text: str) -> None:
         """Add a plain-text comment to the issue."""

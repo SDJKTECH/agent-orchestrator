@@ -14,6 +14,7 @@ from orchestrator.app.agents.execution_manager import ExecutionManager
 from orchestrator.app.core.config import Settings
 from orchestrator.app.db.models import Milestone, Project, Task, TaskStatus
 from orchestrator.app.jira.columns import BLOCKED, QUEUED
+from orchestrator.app.jira.creator import creation_lock
 from orchestrator.app.jira.importer import (
     JiraItemSource,
     default_milestone,
@@ -104,12 +105,14 @@ class JiraPoller:
 
         with self.session_factory() as session:
             milestone_id = self._ensure_milestone(session)
-            result = sync_jira_items(
-                session=session,
-                milestone_id=milestone_id,
-                source=source,
-                worktrees_root=self.repository_path.parent / "agent-worktrees",
-            )
+            # Not while a plan is being made in Jira: its blocking links come last.
+            with creation_lock:
+                result = sync_jira_items(
+                    session=session,
+                    milestone_id=milestone_id,
+                    source=source,
+                    worktrees_root=self.repository_path.parent / "agent-worktrees",
+                )
 
             edges = self._plan(session, result.imported, result.links)
 

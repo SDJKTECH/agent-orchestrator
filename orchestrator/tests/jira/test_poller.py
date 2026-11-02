@@ -180,3 +180,31 @@ def test_starting_the_poller_checks_the_skip_types(tmp_path, monkeypatch) -> Non
     jira_poller.stop()
 
     assert seen == [settings]
+
+
+def test_the_poller_does_not_import_while_a_plan_is_being_made(
+    env, monkeypatch
+) -> None:
+    import threading
+    import time
+
+    from orchestrator.app.jira.creator import creation_lock
+
+    jira_poller, _, _ = make_poller(env, [work("SG-3", "SG-2", [EPIC, STORY])])
+    done = threading.Event()
+    creation_lock.acquire()
+
+    try:
+        thread = threading.Thread(
+            target=lambda: (jira_poller.poll_once(), done.set()), daemon=True
+        )
+        thread.start()
+        time.sleep(0.5)
+
+        # The plan's blocking links are not all made yet: nothing is imported.
+        assert not done.is_set()
+    finally:
+        creation_lock.release()
+
+    thread.join(timeout=30)
+    assert done.is_set()

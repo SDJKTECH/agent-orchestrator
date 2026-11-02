@@ -57,3 +57,21 @@ class JiraItem(Base):
 
         chain.reverse()
         return chain
+
+
+class Requirement(Base):
+    """A requirement that was planned into a Jira Epic, so it is planned only once."""
+
+    __tablename__ = "requirements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Where it came from, e.g. "github#12"; unique when given.
+    reference: Mapped[str | None] = mapped_column(
+        String(200), unique=True, nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(250))
+    text: Mapped[str] = mapped_column(Text, default="")
+    epic_key: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )

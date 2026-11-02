@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     # "Building=In Progress,PR open=In Review,Failed=Blocked". "-" means no move.
     jira_status_map: str | None = None
 
+    # Issue type names used when the planner creates a requirement's issues in Jira.
+    jira_epic_type: str = "Epic"
+    jira_story_type: str = "Story"
+    jira_subtask_type: str = "Subtask"
+    # How much the planner may split one requirement.
+    requirement_max_stories: int = Field(default=8, ge=1)
+    requirement_max_subtasks: int = Field(default=8, ge=1)
+
     # Where the agents may put files for a Jira task: its code goes in
     # <jira_code_root>/<project name>/ and its tests in <jira_tests_root>/.
     # Anything else they touch sends the task back to the builder. An empty
