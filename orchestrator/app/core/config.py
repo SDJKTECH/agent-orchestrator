@@ -113,6 +113,9 @@ class Settings(BaseSettings):
     requirement_label: str = "requirement"
     # Added to a requirement issue once it is planned; empty adds nothing.
     requirement_planned_label: str = "planned"
+    # An issue with this label spells out the Epics, Stories and Subtasks it wants;
+    # the planner then creates exactly those instead of deciding for itself.
+    requirement_structured_label: str = "structured"
     # How much the planner may split one requirement.
     requirement_max_stories: int = Field(default=8, ge=1)
     requirement_max_subtasks: int = Field(default=8, ge=1)

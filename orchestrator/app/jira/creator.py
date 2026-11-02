@@ -20,11 +20,17 @@ creation_lock = threading.Lock()
 class CreatedIssues:
     """The Jira keys made for a plan."""
 
-    epic: str
-    # One key per planned Story, in order.
+    # One key per planned Epic, in order.
+    epics: list[str] = field(default_factory=list)
+    # One key per planned Story, in order across all the Epics.
     stories: list[str] = field(default_factory=list)
     # Planner ref -> Jira key of each Subtask.
     subtasks: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def epic(self) -> str:
+        """The first Epic's key."""
+        return self.epics[0]
 
 
 def create_issues(
@@ -44,32 +50,31 @@ def create_issues(
         return key
 
     with creation_lock:
+        created = CreatedIssues()
+
         try:
-            created = CreatedIssues(
-                epic=create(
-                    settings.jira_epic_type,
-                    plan.epic_summary,
-                    plan.epic_description,
-                    None,
+            for epic in plan.epics:
+                epic_key = create(
+                    settings.jira_epic_type, epic.summary, epic.description, None
                 )
-            )
+                created.epics.append(epic_key)
 
-            for story in plan.stories:
-                story_key = create(
-                    settings.jira_story_type,
-                    story.summary,
-                    story.description,
-                    created.epic,
-                )
-                created.stories.append(story_key)
-
-                for sub in story.subtasks:
-                    created.subtasks[sub.ref] = create(
-                        settings.jira_subtask_type,
-                        sub.summary,
-                        sub.description,
-                        story_key,
+                for story in epic.stories:
+                    story_key = create(
+                        settings.jira_story_type,
+                        story.summary,
+                        story.description,
+                        epic_key,
                     )
+                    created.stories.append(story_key)
+
+                    for sub in story.subtasks:
+                        created.subtasks[sub.ref] = create(
+                            settings.jira_subtask_type,
+                            sub.summary,
+                            sub.description,
+                            story_key,
+                        )
 
             for sub in plan.subtasks():
                 for ref in sub.depends_on:
@@ -81,8 +86,8 @@ def create_issues(
             ) from exc
 
     logger.info(
-        "Requirement planned in Jira: epic=%s stories=%s subtasks=%s",
-        created.epic,
+        "Requirement planned in Jira: epics=%s stories=%s subtasks=%s",
+        created.epics,
         len(created.stories),
         len(created.subtasks),
     )

@@ -155,17 +155,25 @@ def requirement_text(issue: Issue, comments: list[str]) -> str:
 
 def outcome_comment(result: RequirementResult, jira: JiraApi | None) -> str:
     """The comment left on a requirement issue once it is planned in Jira."""
-    link = (
-        jira.browse_url(result.epic_key)
-        if jira is not None and result.epic_key
-        else result.epic_key
-    )
+
+    def link(key: str) -> str:
+        return jira.browse_url(key) if jira is not None else key
+
+    keys = result.epic_keys or ([result.epic_key] if result.epic_key else [])
 
     if result.existing or result.plan is None or result.created is None:
-        return f"This requirement is planned in Jira: {link}"
+        return "This requirement is planned in Jira: " + ", ".join(
+            link(key) for key in keys
+        )
 
+    several = len(result.plan.epics) > 1
     lines = [
-        f"Planned in Jira as Epic {result.epic_key}: {link}",
+        "Planned in Jira as "
+        + (
+            "Epics " + ", ".join(keys)
+            if several
+            else f"Epic {keys[0]}: {link(keys[0])}"
+        ),
         "",
         "The agents build each Subtask on its own branch; one pull request is "
         "opened for each Story once all its Subtasks are done.",
@@ -183,17 +191,29 @@ def outcome_comment(result: RequirementResult, jira: JiraApi | None) -> str:
             ]
         )
 
-    for index, story in enumerate(result.plan.stories):
-        lines.append(f"- {result.created.stories[index]} {story.summary}")
+    created = result.created
+    story_index = 0
 
-        for sub in story.subtasks:
-            needs = ", ".join(result.created.subtasks[ref] for ref in sub.depends_on)
-            lines.append(
-                f"  - {result.created.subtasks[sub.ref]} {sub.summary}"
-                + (f" (after {needs})" if needs else "")
-            )
+    for epic_index, epic in enumerate(result.plan.epics):
+        if several:
+            key = created.epics[epic_index]
+            lines.extend([f"Epic {key} {epic.summary}: {link(key)}", ""])
 
-    return "\n".join(lines)
+        for story in epic.stories:
+            lines.append(f"- {created.stories[story_index]} {story.summary}")
+            story_index += 1
+
+            for sub in story.subtasks:
+                needs = ", ".join(created.subtasks[ref] for ref in sub.depends_on)
+                lines.append(
+                    f"  - {created.subtasks[sub.ref]} {sub.summary}"
+                    + (f" (after {needs})" if needs else "")
+                )
+
+        if several:
+            lines.append("")
+
+    return "\n".join(lines).rstrip()
 
 
 class RequirementIntake:
@@ -269,6 +289,11 @@ class RequirementIntake:
 
         return epics
 
+    def is_structured(self, issue: Issue) -> bool:
+        """True if the issue carries the label that says it spells out its structure."""
+        label = self.settings.requirement_structured_label.strip().casefold()
+        return bool(label) and label in (name.casefold() for name in issue.labels)
+
     def _plan_one(self, session: Session, issue: Issue) -> str | None:
         """Plan one requirement, report it on the issue; None if it failed."""
         self._attempts[issue.number] = self._attempts.get(issue.number, 0) + 1
@@ -282,6 +307,7 @@ class RequirementIntake:
                 issue.title,
                 requirement_text(issue, self.source.discussion(issue.number)),
                 reference_for(issue),
+                structured=self.is_structured(issue),
             )
         except Exception as exc:
             session.rollback()

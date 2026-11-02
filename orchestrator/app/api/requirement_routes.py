@@ -23,6 +23,8 @@ class RequirementCreate(BaseModel):
     reference: str | None = Field(default=None, max_length=200)
     # Show the plan without creating anything in Jira.
     dry_run: bool = False
+    # The text spells out the Epics, Stories and Subtasks: create exactly those.
+    structured: bool = False
 
 
 class PlannedSubtaskResponse(BaseModel):
@@ -42,15 +44,26 @@ class PlannedStoryResponse(BaseModel):
     subtasks: list[PlannedSubtaskResponse]
 
 
+class PlannedEpicResponse(BaseModel):
+    """A planned Epic and its Stories."""
+
+    key: str | None
+    summary: str
+    stories: list[PlannedStoryResponse]
+
+
 class RequirementResponse(BaseModel):
     """The plan for a requirement and the Jira keys made for it."""
 
     epic_key: str | None
     epic_summary: str | None
+    epic_keys: list[str]
     created: bool
     already_planned: bool
     assumptions: list[str]
+    # Every Story of every Epic; `epics` groups them.
     stories: list[PlannedStoryResponse]
+    epics: list[PlannedEpicResponse]
 
 
 def get_planner() -> RequirementPlanner:
@@ -86,35 +99,53 @@ def plan_requirement_endpoint(
             body.description,
             body.reference,
             body.dry_run,
+            body.structured,
         )
     except PlanningError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     plan, created = result.plan, result.created
+    epics = []
     stories = []
+    index = 0
 
-    for index, story in enumerate(plan.stories if plan else []):
-        stories.append(
-            PlannedStoryResponse(
-                key=created.stories[index] if created else None,
-                summary=story.summary,
-                subtasks=[
-                    PlannedSubtaskResponse(
-                        ref=sub.ref,
-                        key=created.subtasks[sub.ref] if created else None,
-                        summary=sub.summary,
-                        depends_on=sub.depends_on,
-                    )
-                    for sub in story.subtasks
-                ],
+    for epic_index, epic in enumerate(plan.epics if plan else []):
+        epic_stories = []
+
+        for story in epic.stories:
+            epic_stories.append(
+                PlannedStoryResponse(
+                    key=created.stories[index] if created else None,
+                    summary=story.summary,
+                    subtasks=[
+                        PlannedSubtaskResponse(
+                            ref=sub.ref,
+                            key=created.subtasks[sub.ref] if created else None,
+                            summary=sub.summary,
+                            depends_on=sub.depends_on,
+                        )
+                        for sub in story.subtasks
+                    ],
+                )
+            )
+            index += 1
+
+        stories.extend(epic_stories)
+        epics.append(
+            PlannedEpicResponse(
+                key=created.epics[epic_index] if created else None,
+                summary=epic.summary,
+                stories=epic_stories,
             )
         )
 
     return RequirementResponse(
         epic_key=result.epic_key,
         epic_summary=plan.epic_summary if plan else None,
+        epic_keys=result.epic_keys,
         created=created is not None,
         already_planned=result.existing,
         assumptions=plan.assumptions if plan else [],
         stories=stories,
+        epics=epics,
     )

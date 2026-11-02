@@ -122,7 +122,7 @@ class BrokenPlanner:
     def __init__(self):
         self.calls = 0
 
-    def plan(self, title, text):
+    def plan(self, title, text, structured=False):
         self.calls += 1
         raise PlanningError("no plan")
 
@@ -148,10 +148,10 @@ def test_a_requirement_that_cannot_be_planned_is_given_up_after_a_few_tries(
 
 def test_one_bad_requirement_does_not_stop_the_others(factory) -> None:
     class PickyPlanner(StubPlanner):
-        def plan(self, title, text):
+        def plan(self, title, text, structured=False):
             if title == "Bad":
                 raise PlanningError("no plan")
-            return super().plan(title, text)
+            return super().plan(title, text, structured)
 
     intake, source, _ = make_intake(
         factory, [issue(1, "Bad"), issue(2, "Good")], PickyPlanner()
@@ -276,9 +276,9 @@ def test_the_planner_is_given_the_comments_of_the_issue(factory) -> None:
     seen = []
 
     class Spy(StubPlanner):
-        def plan(self, title, text):
+        def plan(self, title, text, structured=False):
             seen.append((title, text))
-            return super().plan(title, text)
+            return super().plan(title, text, structured)
 
     intake, source, _ = make_intake(factory, [issue(7)], Spy())
     source.talk[7] = ["Please use Python"]
@@ -292,8 +292,8 @@ def test_the_planner_is_given_the_comments_of_the_issue(factory) -> None:
 
 def test_the_assumptions_are_put_to_the_author_on_the_issue(factory) -> None:
     class Guessing(StubPlanner):
-        def plan(self, title, text):
-            plan = super().plan(title, text)
+        def plan(self, title, text, structured=False):
+            plan = super().plan(title, text, structured)
             plan.assumptions = ["It is a terminal game"]
             return plan
 

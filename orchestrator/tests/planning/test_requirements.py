@@ -66,6 +66,7 @@ def settings(**extra):
         "jira_epic_type": "Epic",
         "jira_story_type": "Story",
         "jira_subtask_type": "Subtask",
+        "requirement_structured_label": "structured",
         "requirement_max_stories": 8,
         "requirement_max_subtasks": 8,
         "claude_command": "claude",
@@ -294,7 +295,7 @@ class StubPlanner:
     def __init__(self):
         self.calls = 0
 
-    def plan(self, title, text):
+    def plan(self, title, text, structured=False):
         self.calls += 1
         return plan_of()
 
@@ -396,7 +397,9 @@ def test_the_endpoint_answers_422_when_the_plan_cannot_be_made(client) -> None:
     http, _ = client
     http.app.dependency_overrides[requirement_routes.get_planner] = lambda: (
         SimpleNamespace(
-            plan=lambda title, text: (_ for _ in ()).throw(PlanningError("no plan"))
+            plan=lambda title, text, structured=False: (_ for _ in ()).throw(
+                PlanningError("no plan")
+            )
         )
     )
 
@@ -489,8 +492,8 @@ def test_the_endpoint_shows_the_assumptions(client) -> None:
     http, _ = client
 
     class Guessing(StubPlanner):
-        def plan(self, title, text):
-            plan = super().plan(title, text)
+        def plan(self, title, text, structured=False):
+            plan = super().plan(title, text, structured)
             plan.assumptions = ["Python"]
             return plan
 

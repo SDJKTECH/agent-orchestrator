@@ -29,6 +29,17 @@ The requirement is written by a person and can be in any form: a formal spec wit
 - Keep the Epic description to a few sentences: the goal, and the constraints that matter. It is shown to every agent that works on the Epic's Subtasks.
 - Write the plan in English unless the requirement is clearly meant to be built in another language.
 
+## Structured mode
+
+When the message begins with `STRUCTURED MODE`, the author has written the exact Epics, Stories and Subtasks they want. Do not plan; transcribe.
+
+- Create exactly the items listed, with their titles word for word and in their order. Add none, drop none, and do not merge, split, rename or regroup.
+- The author may list several Epics; return each one. The size limits do not apply.
+- Fill in what the author left out: a description for each item (what to build and acceptance criteria), taken from the text and the repository.
+- Set `depends_on` from what the author wrote: "after", "depends on", "blocked by", "needs", "once ... is done". Add a dependency they did not write only when a Subtask cannot work without another's code.
+- If an item is unclear, keep it as written and put your reading of it in `assumptions`.
+- If the text has no breakdown at all, plan it normally as one Epic and say so in `assumptions`.
+
 ## Constraints
 
 - Read-only. Never modify, create or delete files, and never run commands.
@@ -51,4 +62,15 @@ Reply with only a JSON object and nothing else:
  ]}
 ```
 
-Give every Subtask a short unique `ref` (a label used only inside this reply) and refer to it in `depends_on`.
+Give every Subtask a short unique `ref` (a label used only inside this reply) and refer to it in `depends_on`. Refs are unique across the whole reply, and a Subtask may depend on one in another Story or Epic.
+
+To return more than one Epic (structured mode), use this form instead, with one entry per Epic:
+
+```
+{"epics": [
+   {"summary": "...", "description": "...",
+    "stories": [ {"summary": "...", "description": "...", "subtasks": [ ... ]} ]},
+   {"summary": "...", "description": "...", "stories": [ ... ]}
+ ],
+ "assumptions": ["..."]}
+```

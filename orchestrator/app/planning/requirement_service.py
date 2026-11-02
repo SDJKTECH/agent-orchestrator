@@ -1,6 +1,6 @@
 # Plans a requirement and creates its issues in Jira, once per requirement.
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -27,6 +27,8 @@ class RequirementResult:
     created: CreatedIssues | None
     epic_key: str | None
     existing: bool = False
+    # Every Epic made (or made earlier); `epic_key` is the first.
+    epic_keys: list[str] = field(default_factory=list)
 
 
 MAX_ORIGINAL_CHARS = 8000
@@ -58,6 +60,7 @@ def plan_requirement(
     text: str,
     reference: str | None = None,
     dry_run: bool = False,
+    structured: bool = False,
 ) -> RequirementResult:
     """Plan a requirement and (unless `dry_run`) create its Jira issues.
 
@@ -70,22 +73,24 @@ def plan_requirement(
         )
 
         if earlier is not None:
-            return RequirementResult(None, None, earlier.epic_key, existing=True)
+            keys = [key for key in earlier.epic_key.split(",") if key]
+            return RequirementResult(None, None, keys[0] if keys else None, True, keys)
 
-    plan = planner.plan(title, text)
+    plan = planner.plan(title, text, structured)
 
     if dry_run or api is None:
         return RequirementResult(plan, None, None)
 
     created = create_issues(api, settings, plan)
-    _keep_original(api, created.epic, title, text, reference)
+    for epic in created.epics:
+        _keep_original(api, epic, title, text, reference)
     session.add(
         Requirement(
             reference=reference,
             title=title[:250],
             text=text,
-            epic_key=created.epic,
+            epic_key=",".join(created.epics),
         )
     )
     session.commit()
-    return RequirementResult(plan, created, created.epic)
+    return RequirementResult(plan, created, created.epic, False, created.epics)

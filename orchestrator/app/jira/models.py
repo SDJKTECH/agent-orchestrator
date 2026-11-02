@@ -71,7 +71,8 @@ class Requirement(Base):
     )
     title: Mapped[str] = mapped_column(String(250))
     text: Mapped[str] = mapped_column(Text, default="")
-    epic_key: Mapped[str] = mapped_column(String(50))
+    # The Epic made for it; several, comma-separated, for a structured requirement.
+    epic_key: Mapped[str] = mapped_column(String(300))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )
