@@ -402,10 +402,14 @@ def ensure_branch_worktree(
     return path
 
 
-def merge_branch(worktree_path: Path, branch: str, message: str) -> bool:
-    """Merge `branch` into the worktree's branch with a merge commit.
+def merge_branch(
+    worktree_path: Path, branch: str, message: str, keep_conflicts: bool = False
+) -> bool:
+    """Merge `branch` into the worktree's branch.
 
-    Returns False, leaving the worktree as it was, when the merge conflicts.
+    Returns False when the merge conflicts. By default the merge is then undone
+    and the worktree left as it was; with `keep_conflicts` the conflicted files
+    stay in the worktree (see `conflicted_files`) for someone to resolve.
     """
     if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or branch.startswith("-"):
         raise RepositoryError(f"Invalid branch name: {branch}")
@@ -415,13 +419,16 @@ def merge_branch(worktree_path: Path, branch: str, message: str) -> bool:
             worktree_path,
             *_identity_args(worktree_path),
             "merge",
-            "--no-ff",
+            "--no-edit",
             "-m",
             message,
             branch,
             timeout=120,
         )
     except RepositoryError:
+        if keep_conflicts and conflicted_files(worktree_path):
+            return False
+
         try:
             _run_git(worktree_path, "merge", "--abort")
         except RepositoryError:
@@ -429,3 +436,9 @@ def merge_branch(worktree_path: Path, branch: str, message: str) -> bool:
         return False
 
     return True
+
+
+def conflicted_files(worktree_path: Path) -> list[str]:
+    """Files with unresolved merge conflicts in the worktree."""
+    names = _run_git(worktree_path, "diff", "--name-only", "--diff-filter=U")
+    return sorted(name for name in names.splitlines() if name)

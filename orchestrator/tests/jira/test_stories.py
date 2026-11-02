@@ -103,11 +103,11 @@ def test_the_story_pull_request_opens_only_when_every_task_is_in(env) -> None:
     build(second, "walls.py")
     item = story_item(first)
 
-    assert delivery.deliver(first, item)
+    assert delivery.deliver(first, item).ok
     assert publisher.calls == []
     assert item.pull_request_url is None
 
-    assert delivery.deliver(second, item)
+    assert delivery.deliver(second, item).ok
 
     assert len(publisher.calls) == 1
     _, head, title, body = publisher.calls[0]
@@ -127,7 +127,7 @@ def test_a_failed_task_keeps_the_story_pull_request_back(env) -> None:
     publisher = FakePublisher()
     build(first, "engine.py")
 
-    assert StoryDelivery(session, publisher).deliver(first, story_item(first))
+    assert StoryDelivery(session, publisher).deliver(first, story_item(first)).ok
     assert publisher.calls == []
 
 
@@ -163,11 +163,16 @@ def test_a_task_that_conflicts_with_the_story_is_not_delivered(env) -> None:
     build(second, "engine.py", "b = 2\n")
     delivery = StoryDelivery(session, FakePublisher())
 
-    assert delivery.deliver(first, story_item(first))
-    assert not delivery.deliver(second, story_item(second))
+    assert delivery.deliver(first, story_item(first)).ok
+    result = delivery.deliver(second, story_item(second))
+
+    assert not result.ok
     assert second.story_branch is None
     # The Story branch is left clean for the next try.
     assert git(root / "story-sg-2", "status", "--porcelain") == ""
+    # The conflict is put in the task's own worktree, for the builder to resolve.
+    assert "engine.py" in result.problem
+    assert "<<<<<<<" in (Path(second.worktree_path) / "engine.py").read_text()
 
 
 def test_a_task_in_the_story_branch_is_not_in_main_until_the_pull_request_merges(
@@ -242,3 +247,113 @@ def test_migration_adds_story_columns_to_an_old_jira_items_table(tmp_path) -> No
     columns = {column["name"] for column in inspect(engine).get_columns("jira_items")}
     assert {"branch_name", "pull_request_url", "pull_request_merged"} <= columns
     engine.dispose()
+
+
+def test_the_builder_can_resolve_a_conflict_and_the_task_is_then_delivered(env) -> None:
+    session, *_ = env
+    first, second = story_tasks(env, "SG-3", "SG-4")
+    build(first, "engine.py", "a = 1\n")
+    build(second, "engine.py", "b = 2\n")
+    delivery = StoryDelivery(session, FakePublisher())
+    delivery.deliver(first, story_item(first))
+    assert not delivery.deliver(second, story_item(second)).ok
+
+    build(second, "engine.py", "a = 1\nb = 2\n")
+
+    assert delivery.deliver(second, story_item(second)).ok
+    assert second.story_branch == "agent/story-sg-2"
+
+
+def test_a_task_started_later_gets_the_code_already_in_the_story(env) -> None:
+    session, *_ = env
+    first, second = story_tasks(env, "SG-3", "SG-4")
+    build(first, "engine.py")
+    delivery = StoryDelivery(session, FakePublisher())
+    delivery.deliver(first, story_item(first))
+
+    delivery.start(second)
+
+    assert (Path(second.worktree_path) / "engine.py").is_file()
+
+
+def test_starting_a_task_without_a_story_does_nothing(env) -> None:
+    session, milestone_id, _, root = env
+    items = [work("SG-3", None, [EPIC])]
+    sync_jira_items(session, milestone_id, StaticItemSource(items), root)
+
+    StoryDelivery(session, FakePublisher()).start(session.scalar(select(Task)))
+
+
+def test_the_pull_request_waits_for_a_story_issue_that_is_not_imported_yet(
+    env,
+) -> None:
+    session, *_ = env
+    (first,) = story_tasks(env, "SG-3")
+    build(first, "engine.py")
+    coming = {"SG-4"}
+    publisher = FakePublisher()
+    delivery = StoryDelivery(session, publisher, open_children=lambda item: coming)
+
+    delivery.deliver(first, story_item(first))
+
+    assert publisher.calls == []
+
+    # Its issue arrives and is built and delivered; then the PR opens.
+    (second,) = story_tasks(env, "SG-4")
+    build(second, "walls.py")
+    delivery.deliver(second, story_item(second))
+
+    assert len(publisher.calls) == 1
+
+
+def test_an_unreadable_jira_keeps_the_pull_request_back(env) -> None:
+    from orchestrator.app.core.exceptions import IssueSourceError
+
+    session, *_ = env
+    (task,) = story_tasks(env, "SG-3")
+    build(task, "engine.py")
+    publisher = FakePublisher()
+
+    def broken(item):
+        raise IssueSourceError("down")
+
+    StoryDelivery(session, publisher, open_children=broken).deliver(
+        task, story_item(task)
+    )
+
+    assert publisher.calls == []
+
+
+def test_a_pull_request_that_failed_to_open_is_retried(env, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from orchestrator.app.jira import stories
+
+    session, *_ = env
+    (task,) = story_tasks(env, "SG-3")
+    build(task, "engine.py")
+    publisher = FakePublisher(url=None)
+    delivery = StoryDelivery(session, publisher)
+    delivery.deliver(task, story_item(task))
+    item = story_item(task)
+
+    assert item.pull_request_url is None
+
+    publisher.url = "https://github.com/o/r/pull/9"
+    monkeypatch.setattr(stories, "make_story_delivery", lambda db, settings: delivery)
+    settings = SimpleNamespace(publish_branches=True, open_pull_request=True)
+
+    assert stories.open_pending_pull_requests(session, settings) == ["SG-2"]
+    assert item.pull_request_url == publisher.url
+    assert stories.open_pending_pull_requests(session, settings) == []
+
+
+def test_nothing_is_retried_when_pull_requests_are_off(env) -> None:
+    from types import SimpleNamespace
+
+    from orchestrator.app.jira.stories import open_pending_pull_requests
+
+    session, *_ = env
+    settings = SimpleNamespace(publish_branches=False, open_pull_request=False)
+
+    assert open_pending_pull_requests(session, settings) == []

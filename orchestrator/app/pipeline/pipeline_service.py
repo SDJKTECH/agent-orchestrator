@@ -23,7 +23,12 @@ from orchestrator.app.github.projects import (
 )
 from orchestrator.app.github.publisher import PullRequestPublisher
 from orchestrator.app.jira.context import describe_hierarchy
-from orchestrator.app.jira.stories import StoryDelivery, story_branch_name, story_item
+from orchestrator.app.jira.stories import (
+    Delivery,
+    StoryDelivery,
+    story_branch_name,
+    story_item,
+)
 from orchestrator.app.pipeline.project_folder import FolderRule, folder_rule
 from orchestrator.app.pipeline.stage_isolation import StageIsolation
 from orchestrator.app.vcs.git_manager import changed_paths
@@ -133,6 +138,9 @@ class PipelineService:
         chain = _Chain()
         problem: str | None = None
 
+        if self.stories is not None and story_item(task) is not None:
+            self.stories.start(task)
+
         for attempt in range(1, self.max_fix_attempts + 2):
             if attempt > 1:
                 logger.info(
@@ -149,10 +157,16 @@ class PipelineService:
                 problem = outcome.problem
                 continue
 
-            if outcome.status == TaskStatus.COMPLETED and not self._deliver(
-                task, chain
-            ):
-                return self._finish(task, TaskStatus.FAILED)
+            if outcome.status == TaskStatus.COMPLETED:
+                delivery = self._deliver(task, chain)
+
+                if delivery.problem and attempt <= self.max_fix_attempts:
+                    # The task conflicts with its Story: the builder resolves it.
+                    problem = delivery.problem
+                    continue
+
+                if not delivery.ok:
+                    return self._finish(task, TaskStatus.FAILED)
 
             return self._finish(task, outcome.status)
 
@@ -243,7 +257,7 @@ class PipelineService:
 
         return _Attempt(status=TaskStatus.COMPLETED)
 
-    def _deliver(self, task: Task, chain: _Chain) -> bool:
+    def _deliver(self, task: Task, chain: _Chain) -> Delivery:
         """Hand over approved work: into its Story's branch, else as its own PR.
 
         A task under a Jira Story gets no pull request of its own; the Story's one
@@ -254,7 +268,7 @@ class PipelineService:
         if item is not None and self.stories is not None:
             return self.stories.deliver(task, item)
 
-        return self._open_pull_request(task, chain.branches, chain.pushed)
+        return Delivery(self._open_pull_request(task, chain.branches, chain.pushed))
 
     def _verification_problem(self) -> str:
         """A message listing the failed checks, to give the builder."""
@@ -341,7 +355,7 @@ class PipelineService:
             header += f"Where to put files: {rule.describe()}\n\n"
         # A task that waited for others was cut from the merged origin/main, which
         # local main may not have caught up with yet.
-        item = story_item(task) if task.blocked_by else None
+        item = story_item(task)
         if item is not None:
             base = story_branch_name(item)
         else:

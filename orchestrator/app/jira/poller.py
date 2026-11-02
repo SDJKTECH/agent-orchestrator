@@ -20,6 +20,7 @@ from orchestrator.app.jira.importer import (
     sync_jira_items,
 )
 from orchestrator.app.jira.source import check_skip_types, make_jira_source
+from orchestrator.app.jira.stories import open_pending_pull_requests
 from orchestrator.app.planning.dependencies import (
     Edge,
     assign_blockers,
@@ -124,6 +125,7 @@ class JiraPoller:
                     self.tracker.link_blocks(edge.blocked, edge.blocker)
 
             self.tracker.sync_merged(session)
+            self._open_story_pull_requests(session)
             for task in release_ready(
                 session,
                 self.repository_path,
@@ -148,6 +150,14 @@ class JiraPoller:
             )
 
         return self._schedule(queued_ids)
+
+    def _open_story_pull_requests(self, session: Session) -> None:
+        """Open the pull request of a finished Story that has none. Never raises."""
+        try:
+            open_pending_pull_requests(session, self.settings)
+        except Exception:
+            logger.exception("Could not open the pending Story pull requests")
+            session.rollback()
 
     def _plan(
         self, session: Session, imported: list[Task], links: dict[int, list[str]]

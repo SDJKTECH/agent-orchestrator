@@ -11,6 +11,7 @@ from orchestrator.app.agents.agent_service import AgentService
 from orchestrator.app.agents.process_control import ProcessControl
 from orchestrator.app.core.exceptions import AgentExecutionError
 from orchestrator.app.db.models import AgentRun, Task, TaskStatus
+from orchestrator.app.jira.stories import Delivery
 from orchestrator.app.pipeline.pipeline_service import (
     PipelineService,
     extract_result_text,
@@ -747,20 +748,25 @@ def test_tasks_that_are_not_from_jira_are_not_restricted(pipeline, monkeypatch) 
 
 
 class FakeStories:
-    def __init__(self, delivered: bool = True) -> None:
-        self.delivered = delivered
-        self.calls: list[tuple[Task, object]] = []
+    def __init__(self, deliveries: list[Delivery]) -> None:
+        self.deliveries = deliveries
+        self.calls: list[Task] = []
+        self.started: list[Task] = []
 
-    def deliver(self, task, item) -> bool:
-        self.calls.append((task, item))
-        if self.delivered:
+    def start(self, task) -> None:
+        self.started.append(task)
+
+    def deliver(self, task, item) -> Delivery:
+        self.calls.append(task)
+        result = self.deliveries[min(len(self.calls), len(self.deliveries)) - 1]
+        if result.ok:
             task.story_branch = "agent/story-sg-2"
             task.pull_request_url = "https://github.com/o/r/pull/9"
-        return self.delivered
+        return result
 
 
-def in_story(pipeline, monkeypatch, delivered: bool = True) -> FakeStories:
-    stories = FakeStories(delivered)
+def in_story(pipeline, monkeypatch, *deliveries: Delivery) -> FakeStories:
+    stories = FakeStories(list(deliveries) or [Delivery(True)])
     pipeline.service.stories = stories
     monkeypatch.setattr(
         "orchestrator.app.pipeline.pipeline_service.story_item",
@@ -796,6 +802,48 @@ def test_a_story_task_is_done_once_it_is_in_the_story_branch(
 
 
 def test_a_story_task_that_cannot_be_delivered_fails(pipeline, monkeypatch) -> None:
-    in_story(pipeline, monkeypatch, delivered=False)
+    in_story(pipeline, monkeypatch, Delivery(False))
 
     assert pipeline.service.run(1).status == TaskStatus.FAILED
+
+
+def test_a_story_task_is_synced_with_its_story_before_it_starts(
+    pipeline, monkeypatch
+) -> None:
+    stories = in_story(pipeline, monkeypatch)
+
+    pipeline.service.run(1)
+
+    assert stories.started == [pipeline.task]
+
+
+def test_a_conflict_with_the_story_goes_back_to_the_builder(
+    pipeline, monkeypatch
+) -> None:
+    stories = in_story(
+        pipeline, monkeypatch, Delivery(False, "Conflicts in engine.py"), Delivery(True)
+    )
+    pipeline.service.max_fix_attempts = 1
+    prompts: list[str] = []
+    original = pipeline.runner.run.side_effect
+
+    def spy(command, **kwargs):
+        prompts.append(command[-1])
+        return original(command, **kwargs)
+
+    pipeline.runner.run.side_effect = spy
+
+    assert pipeline.service.run(1).status == TaskStatus.COMPLETED
+
+    assert len(stories.calls) == 2
+    assert pipeline.calls.count("builder") == 2
+    assert any("Conflicts in engine.py" in prompt for prompt in prompts)
+
+
+def test_a_conflict_fails_the_task_when_no_fix_attempts_are_left(
+    pipeline, monkeypatch
+) -> None:
+    in_story(pipeline, monkeypatch, Delivery(False, "Conflicts in engine.py"))
+
+    assert pipeline.service.run(1).status == TaskStatus.FAILED
+    assert pipeline.calls.count("builder") == 1

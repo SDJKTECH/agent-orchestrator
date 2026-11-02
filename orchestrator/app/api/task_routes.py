@@ -18,7 +18,7 @@ from orchestrator.app.db.database import SessionLocal, get_db
 from orchestrator.app.db.models import Task, TaskStatus
 from orchestrator.app.github.publisher import make_publisher
 from orchestrator.app.github.reporter import make_reporter, outcome_message
-from orchestrator.app.jira.stories import StoryDelivery
+from orchestrator.app.jira.stories import make_story_delivery
 from orchestrator.app.pipeline.pipeline_service import PipelineService
 from orchestrator.app.pipeline.stage_isolation import GitStageIsolation
 from orchestrator.app.services.task_service import create_task
@@ -151,13 +151,7 @@ def _build_pipeline(session: Session) -> PipelineService:
         board=make_board(settings),
         code_root=settings.jira_code_root,
         tests_root=settings.jira_tests_root,
-        stories=StoryDelivery(
-            db=session,
-            publisher=publisher,
-            base_branch=settings.base_branch,
-            remote=settings.git_remote,
-            publish=settings.publish_branches,
-        ),
+        stories=make_story_delivery(session, settings),
     )
 
 
