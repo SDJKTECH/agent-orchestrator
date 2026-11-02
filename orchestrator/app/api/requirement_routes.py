@@ -49,6 +49,7 @@ class RequirementResponse(BaseModel):
     epic_summary: str | None
     created: bool
     already_planned: bool
+    assumptions: list[str]
     stories: list[PlannedStoryResponse]
 
 
@@ -114,5 +115,6 @@ def plan_requirement_endpoint(
         epic_summary=plan.epic_summary if plan else None,
         created=created is not None,
         already_planned=result.existing,
+        assumptions=plan.assumptions if plan else [],
         stories=stories,
     )

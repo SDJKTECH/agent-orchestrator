@@ -17,6 +17,7 @@ from orchestrator.app.planning.requirement_intake import (
     GitHubRequirementSource,
     RequirementIntake,
     make_requirement_intake,
+    requirement_text,
 )
 from orchestrator.tests.planning.test_requirements import (
     FakeJira,
@@ -28,11 +29,15 @@ from orchestrator.tests.planning.test_requirements import (
 class FakeSource:
     def __init__(self, issues):
         self.issues = issues
+        self.talk = {}
         self.comments = []
         self.marked = []
 
     def list_requirements(self):
         return self.issues
+
+    def discussion(self, number):
+        return self.talk.get(number, [])
 
     def comment(self, number, body):
         self.comments.append((number, body))
@@ -249,3 +254,79 @@ def test_the_intake_is_built_from_the_settings(monkeypatch, factory) -> None:
     assert intake is not None
     assert intake.source.label == "req" and intake.source.planned_label == "done"
     assert intake.interval_seconds == 5
+
+
+def test_the_text_planned_includes_labels_and_the_discussion() -> None:
+    issue = Issue(
+        number=1, title="T", body=" Make a game ", labels=["requirement", "p1"]
+    )
+
+    text = requirement_text(issue, ["Use Python", "Keep it small"])
+
+    assert text.startswith("Make a game")
+    assert "Labels: requirement, p1" in text
+    assert "Use Python\n\n---\n\nKeep it small" in text
+
+
+def test_an_issue_with_only_a_title_gives_empty_text() -> None:
+    assert requirement_text(Issue(number=1, title="T"), []) == ""
+
+
+def test_the_planner_is_given_the_comments_of_the_issue(factory) -> None:
+    seen = []
+
+    class Spy(StubPlanner):
+        def plan(self, title, text):
+            seen.append((title, text))
+            return super().plan(title, text)
+
+    intake, source, _ = make_intake(factory, [issue(7)], Spy())
+    source.talk[7] = ["Please use Python"]
+
+    intake.run_once()
+
+    [(title, text)] = seen
+    assert title == "Snake game"
+    assert "Build it" in text and "Please use Python" in text
+
+
+def test_the_assumptions_are_put_to_the_author_on_the_issue(factory) -> None:
+    class Guessing(StubPlanner):
+        def plan(self, title, text):
+            plan = super().plan(title, text)
+            plan.assumptions = ["It is a terminal game"]
+            return plan
+
+    intake, source, _ = make_intake(factory, [issue(7)], Guessing())
+
+    intake.run_once()
+
+    [(_, body)] = source.comments
+    assert "I had to assume the following" in body
+    assert "- It is a terminal game" in body
+
+
+def test_no_assumptions_section_when_there_were_none(factory) -> None:
+    intake, source, _ = make_intake(factory, [issue(7)])
+
+    intake.run_once()
+
+    assert "assume" not in source.comments[0][1]
+
+
+def test_the_github_source_reads_the_comments_of_an_issue() -> None:
+    api = FakeGitHub(
+        [{"body": " first "}, {"body": ""}, {"nobody": 1}, "junk", {"body": "second"}]
+    )
+
+    assert GitHubRequirementSource(api, "r").discussion(5) == ["first", "second"]
+    assert api.sent[0][1].startswith("/issues/5/comments")
+
+
+def test_unreadable_comments_are_left_out_not_fatal() -> None:
+    class Broken(FakeGitHub):
+        def request(self, method, path, body=None):
+            raise IssueSourceError("down")
+
+    assert GitHubRequirementSource(Broken([]), "r").discussion(5) == []
+    assert GitHubRequirementSource(FakeGitHub({"x": 1}), "r").discussion(5) == []

@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 # Planner runs per cycle; the rest wait for the next one.
 MAX_PER_CYCLE = 3
+# Comments of an issue that are read along with its text.
+MAX_COMMENTS = 20
 
 
 def reference_for(issue: Issue) -> str:
@@ -38,6 +40,8 @@ class RequirementSource(Protocol):
     """Where requirements come from, and where the outcome is reported."""
 
     def list_requirements(self) -> list[Issue]: ...
+
+    def discussion(self, number: int) -> list[str]: ...
 
     def comment(self, number: int, body: str) -> bool: ...
 
@@ -89,6 +93,29 @@ class GitHubRequirementSource:
 
         return issues
 
+    def discussion(self, number: int) -> list[str]:
+        """What people wrote in the issue's comments, oldest first.
+
+        Requirements are often clarified there. A failure to read them just
+        leaves them out.
+        """
+        try:
+            found = self.api.request(
+                "GET", f"/issues/{number}/comments?per_page={MAX_COMMENTS}"
+            )
+        except OrchestratorError as exc:
+            logger.warning("Could not read comments of #%s: %s", number, exc)
+            return []
+
+        if not isinstance(found, list):
+            return []
+
+        return [
+            str(item["body"]).strip()
+            for item in found[:MAX_COMMENTS]
+            if isinstance(item, dict) and str(item.get("body") or "").strip()
+        ]
+
     def comment(self, number: int, body: str) -> bool:
         """Comment on the issue; False when there is no token or GitHub refuses."""
         return self._write(f"/issues/{number}/comments", {"body": body})
@@ -113,6 +140,19 @@ class GitHubRequirementSource:
         return True
 
 
+def requirement_text(issue: Issue, comments: list[str]) -> str:
+    """Everything written about a requirement: its text, labels and discussion."""
+    parts = [issue.body.strip()]
+
+    if issue.labels:
+        parts.append("Labels: " + ", ".join(issue.labels))
+
+    if comments:
+        parts.append("Discussion on the issue:\n\n" + "\n\n---\n\n".join(comments))
+
+    return "\n\n".join(part for part in parts if part)
+
+
 def outcome_comment(result: RequirementResult, jira: JiraApi | None) -> str:
     """The comment left on a requirement issue once it is planned in Jira."""
     link = (
@@ -131,6 +171,17 @@ def outcome_comment(result: RequirementResult, jira: JiraApi | None) -> str:
         "opened for each Story once all its Subtasks are done.",
         "",
     ]
+
+    if result.plan.assumptions:
+        lines.extend(
+            [
+                "I had to assume the following. Please correct anything that is "
+                "wrong, then re-plan.",
+                "",
+                *[f"- {item}" for item in result.plan.assumptions],
+                "",
+            ]
+        )
 
     for index, story in enumerate(result.plan.stories):
         lines.append(f"- {result.created.stories[index]} {story.summary}")
@@ -229,7 +280,7 @@ class RequirementIntake:
                 self.jira,
                 self.settings,
                 issue.title,
-                issue.body,
+                requirement_text(issue, self.source.discussion(issue.number)),
                 reference_for(issue),
             )
         except Exception as exc:
