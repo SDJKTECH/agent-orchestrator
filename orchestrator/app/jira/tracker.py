@@ -28,6 +28,7 @@ from orchestrator.app.jira.merged import (
 )
 from orchestrator.app.jira.messages import outcome_message
 from orchestrator.app.jira.models import JiraItem
+from orchestrator.app.jira.progress import sync_progress
 from orchestrator.app.planning.dependencies import describe_blockers
 
 logger = logging.getLogger(__name__)
@@ -178,7 +179,18 @@ class JiraTracker:
     def sync_merged(self, session: Session) -> list[int]:
         """Mark tasks whose pull request has merged as Done in Jira."""
         sync_merged_stories(session, self.pulls, self._finish_story)
+        sync_progress(session, self.api, self.status_map, self.set_status)
         return sync_merged_tasks(session, self.pulls, self.move)
+
+    def set_status(self, key: str, target: str) -> bool:
+        """Move an issue to the status named `target`. False if Jira cannot be told."""
+        try:
+            self._transition(key, target)
+        except OrchestratorError as exc:
+            logger.warning("Could not move %s to '%s': %s", key, target, exc)
+            return False
+
+        return True
 
     def _finish_story(self, item: JiraItem) -> bool:
         """Move a Story to Done in Jira once its pull request is merged."""
@@ -186,6 +198,7 @@ class JiraTracker:
             target = self.status_map.get(DONE)
             if target:
                 self._transition(item.key, target)
+                item.jira_status = target
             self.api.comment(
                 item.key, f"The pull request was merged: {item.pull_request_url}"
             )
