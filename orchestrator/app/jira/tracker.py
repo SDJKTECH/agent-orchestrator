@@ -21,8 +21,13 @@ from orchestrator.app.jira.columns import (
     REVIEWING,
     TESTING,
 )
-from orchestrator.app.jira.merged import PullRequests, sync_merged_tasks
+from orchestrator.app.jira.merged import (
+    PullRequests,
+    sync_merged_stories,
+    sync_merged_tasks,
+)
 from orchestrator.app.jira.messages import outcome_message
+from orchestrator.app.jira.models import JiraItem
 from orchestrator.app.planning.dependencies import describe_blockers
 
 logger = logging.getLogger(__name__)
@@ -172,7 +177,23 @@ class JiraTracker:
 
     def sync_merged(self, session: Session) -> list[int]:
         """Mark tasks whose pull request has merged as Done in Jira."""
+        sync_merged_stories(session, self.pulls, self._finish_story)
         return sync_merged_tasks(session, self.pulls, self.move)
+
+    def _finish_story(self, item: JiraItem) -> bool:
+        """Move a Story to Done in Jira once its pull request is merged."""
+        try:
+            target = self.status_map.get(DONE)
+            if target:
+                self._transition(item.key, target)
+            self.api.comment(
+                item.key, f"The pull request was merged: {item.pull_request_url}"
+            )
+        except OrchestratorError as exc:
+            logger.warning("Could not finish Story %s in Jira: %s", item.key, exc)
+            return False
+
+        return True
 
 
 def make_jira_tracker(settings: Settings) -> JiraTracker:

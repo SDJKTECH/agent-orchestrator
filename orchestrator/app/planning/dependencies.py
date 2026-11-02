@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 from orchestrator.app.core.exceptions import RepositoryError
 from orchestrator.app.db.models import Task, TaskStatus
 from orchestrator.app.github.projects import DONE
+from orchestrator.app.jira.stories import (
+    blocker_in_story,
+    prepare_story_branch,
+    story_item,
+)
 from orchestrator.app.planning.planner import Dependency, task_label
 from orchestrator.app.vcs.git_manager import (
     create_worktree,
@@ -55,7 +60,18 @@ def get_blockers(task: Task) -> list[dict]:
 
 
 def is_merged(task: Task) -> bool:
-    """A task's work is in main: finished, and its pull request (if any) merged."""
+    """A task's work is in main: finished, and its pull request (if any) merged.
+
+    A task of a Jira Story is in main once the Story's pull request is merged.
+    """
+    if task.story_branch:
+        story = story_item(task)
+        return (
+            task.status == TaskStatus.COMPLETED
+            and story is not None
+            and story.pull_request_merged
+        )
+
     return task.status == TaskStatus.COMPLETED and (
         task.board_column == DONE or not task.pull_request_url
     )
@@ -184,7 +200,9 @@ def release_ready(
 ) -> list[Task]:
     """Queue every BLOCKED task whose blockers are all merged.
 
-    With `jira_only`, a blocker that is not a Jira task is not waited for.
+    With `jira_only`, a blocker that is not a Jira task is not waited for. A
+    blocker in the same Story is done once it is in the Story's branch, and the
+    task is then cut from that branch instead of main.
 
     Its placeholder worktree (cut from an older main) is replaced by one cut from
     the up-to-date remote branch, so the task sees the blockers' code.
@@ -197,6 +215,7 @@ def release_ready(
         if all(
             (blocker := session.get(Task, entry["task_id"])) is None
             or is_merged(blocker)
+            or blocker_in_story(blocker, task)
             or (jira_only and not blocker.jira_key)
             for entry in get_blockers(task)
         )
@@ -217,6 +236,9 @@ def release_ready(
 
     for task in waiting:
         name = f"task-{task.id}"
+        base = prepare_story_branch(task, f"{remote}/{base_branch}") or (
+            f"{remote}/{base_branch}"
+        )
         root = Path(task.worktree_path).parent if task.worktree_path else None
 
         try:
@@ -233,9 +255,7 @@ def release_ready(
                     # An earlier attempt may have half-removed it; start clean.
                     discard_leftover_worktree(repository_path, root, name)
 
-                create_worktree(
-                    repository_path, root, name, base_branch=f"{remote}/{base_branch}"
-                )
+                create_worktree(repository_path, root, name, base_branch=base)
         except RepositoryError as exc:
             logger.warning("Could not release task %s: %s", task.id, exc)
             continue

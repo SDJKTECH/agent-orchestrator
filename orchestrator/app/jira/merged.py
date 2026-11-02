@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from orchestrator.app.core.exceptions import OrchestratorError
 from orchestrator.app.db.models import Task
 from orchestrator.app.jira.columns import DONE, PR_OPEN
+from orchestrator.app.jira.models import JiraItem
 
 logger = logging.getLogger(__name__)
 
@@ -54,5 +55,43 @@ def sync_merged_tasks(
 
         if isinstance(pull, dict) and pull.get("merged") and move(task, DONE):
             done.append(task.id)
+
+    return done
+
+
+def sync_merged_stories(
+    session: Session,
+    pulls: PullRequests | None,
+    finish: Callable[[JiraItem], bool],
+) -> list[str]:
+    """Finish each Story whose pull request was merged; return their keys."""
+    if pulls is None:
+        return []
+
+    done: list[str] = []
+    waiting = session.scalars(
+        select(JiraItem).where(
+            JiraItem.pull_request_url.is_not(None),
+            JiraItem.pull_request_merged.is_(False),
+        )
+    )
+
+    for item in waiting:
+        match = _PULL_NUMBER.search(item.pull_request_url or "")
+
+        if match is None:
+            continue
+
+        try:
+            pull = pulls.request("GET", f"/pulls/{match[1]}")
+        except OrchestratorError as exc:
+            logger.warning("Could not read pull request: %s", exc)
+            continue
+
+        if isinstance(pull, dict) and pull.get("merged"):
+            item.pull_request_merged = True
+            session.commit()
+            finish(item)
+            done.append(item.key)
 
     return done

@@ -370,3 +370,62 @@ def push_branch(worktree_path: Path, branch: str, remote: str = "origin") -> Non
             raise RepositoryError(f"Invalid branch or remote name: {value}")
 
     _run_git(worktree_path, "push", "-u", remote, branch, timeout=120)
+
+
+def branch_exists(repository_path: Path, branch: str) -> bool:
+    """True if a local branch with this name exists."""
+    return bool(_run_git(repository_path, "branch", "--list", branch))
+
+
+def ensure_branch_worktree(
+    repository_path: Path,
+    worktrees_root: Path,
+    name: str,
+    base_branch: str = "main",
+) -> Path:
+    """The worktree of branch agent/<name>, created (from base_branch) if missing.
+
+    A branch that exists without a worktree, for example after the worktree was
+    deleted, is checked out again rather than recreated.
+    """
+    repository = validate_repository(repository_path)
+    branch = f"agent/{name}"
+    path = worktrees_root.expanduser().resolve() / name
+
+    if path.exists():
+        return path
+
+    if not branch_exists(repository, branch):
+        return create_worktree(repository, worktrees_root, name, base_branch)
+
+    _run_git(repository, "worktree", "add", str(path), branch)
+    return path
+
+
+def merge_branch(worktree_path: Path, branch: str, message: str) -> bool:
+    """Merge `branch` into the worktree's branch with a merge commit.
+
+    Returns False, leaving the worktree as it was, when the merge conflicts.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or branch.startswith("-"):
+        raise RepositoryError(f"Invalid branch name: {branch}")
+
+    try:
+        _run_git(
+            worktree_path,
+            *_identity_args(worktree_path),
+            "merge",
+            "--no-ff",
+            "-m",
+            message,
+            branch,
+            timeout=120,
+        )
+    except RepositoryError:
+        try:
+            _run_git(worktree_path, "merge", "--abort")
+        except RepositoryError:
+            pass  # The merge did not start, so there is nothing to abort.
+        return False
+
+    return True

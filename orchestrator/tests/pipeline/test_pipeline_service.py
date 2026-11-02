@@ -744,3 +744,58 @@ def test_tasks_that_are_not_from_jira_are_not_restricted(pipeline, monkeypatch) 
     assert "Where to put files" not in PipelineService._build_prompt(
         pipeline.task, "builder"
     )
+
+
+class FakeStories:
+    def __init__(self, delivered: bool = True) -> None:
+        self.delivered = delivered
+        self.calls: list[tuple[Task, object]] = []
+
+    def deliver(self, task, item) -> bool:
+        self.calls.append((task, item))
+        if self.delivered:
+            task.story_branch = "agent/story-sg-2"
+            task.pull_request_url = "https://github.com/o/r/pull/9"
+        return self.delivered
+
+
+def in_story(pipeline, monkeypatch, delivered: bool = True) -> FakeStories:
+    stories = FakeStories(delivered)
+    pipeline.service.stories = stories
+    monkeypatch.setattr(
+        "orchestrator.app.pipeline.pipeline_service.story_item",
+        lambda task: SimpleNamespace(key="SG-2"),
+    )
+    return stories
+
+
+def test_a_story_task_is_delivered_to_its_story_not_given_its_own_pull_request(
+    pipeline, monkeypatch
+) -> None:
+    stories = in_story(pipeline, monkeypatch)
+    publisher = MagicMock()
+    pipeline.service.publisher = publisher
+
+    assert pipeline.service.run(1).status == TaskStatus.COMPLETED
+
+    assert len(stories.calls) == 1
+    publisher.open_pull_request.assert_not_called()
+
+
+def test_a_story_task_is_done_once_it_is_in_the_story_branch(
+    pipeline, monkeypatch
+) -> None:
+    in_story(pipeline, monkeypatch)
+    service, moves = with_board(pipeline)
+    service.stories = pipeline.service.stories
+
+    service.run(1)
+
+    # The Story's pull request is shown on the task, but the task itself is done.
+    assert moves[-1] == "Done"
+
+
+def test_a_story_task_that_cannot_be_delivered_fails(pipeline, monkeypatch) -> None:
+    in_story(pipeline, monkeypatch, delivered=False)
+
+    assert pipeline.service.run(1).status == TaskStatus.FAILED

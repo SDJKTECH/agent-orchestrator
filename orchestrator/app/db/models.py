@@ -121,6 +121,8 @@ class Task(Base):
     )
     # Tasks that must be merged first: JSON list of {"task_id": N, "reason": "..."}.
     blocked_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The Story branch this task's work was merged into once it passed review.
+    story_branch: Mapped[str | None] = mapped_column(String(250), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )

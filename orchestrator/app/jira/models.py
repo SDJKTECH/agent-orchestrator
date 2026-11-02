@@ -2,7 +2,7 @@
 # `parent_key` links an issue to its parent, so Epic > Story > Task is a chain of rows.
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from orchestrator.app.db.database import Base
@@ -31,6 +31,10 @@ class JiraItem(Base):
     parent_key: Mapped[str | None] = mapped_column(
         ForeignKey("jira_items.key"), nullable=True, index=True
     )
+    # A Story's own Git branch and pull request; its Tasks are merged into the branch.
+    branch_name: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    pull_request_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pull_request_merged: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )

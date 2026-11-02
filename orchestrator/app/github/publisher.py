@@ -16,7 +16,13 @@ logger = logging.getLogger(__name__)
 class PullRequestPublisher(Protocol):
     """Anything that can open a pull request for a task's branch."""
 
-    def open_pull_request(self, task: Task, head: str) -> str | None: ...
+    def open_pull_request(
+        self,
+        task: Task,
+        head: str,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> str | None: ...
 
 
 def pull_request_body(task: Task) -> str:
@@ -54,8 +60,17 @@ class GhPullRequestPublisher:
         self.github_repo = github_repo
         self.base_branch = base_branch
 
-    def open_pull_request(self, task: Task, head: str) -> str | None:
-        """Open the PR with the `gh` CLI; return its URL."""
+    def open_pull_request(
+        self,
+        task: Task,
+        head: str,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> str | None:
+        """Open the PR with the `gh` CLI; return its URL.
+
+        A Story's pull request passes its own title and body.
+        """
         command = [
             "gh",
             "pr",
@@ -65,9 +80,9 @@ class GhPullRequestPublisher:
             "--head",
             head,
             "--title",
-            f"{task.title} (agent task {task.id})",
+            title or f"{task.title} (agent task {task.id})",
             "--body",
-            pull_request_body(task),
+            body or pull_request_body(task),
         ]
 
         if self.github_repo:
@@ -107,7 +122,13 @@ class RestPullRequestPublisher:
         self.api = api
         self.base_branch = base_branch
 
-    def open_pull_request(self, task: Task, head: str) -> str | None:
+    def open_pull_request(
+        self,
+        task: Task,
+        head: str,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> str | None:
         """Open the PR with the GitHub REST API; return its URL."""
         if not self.api.can_write:
             return (
@@ -120,10 +141,10 @@ class RestPullRequestPublisher:
                 "POST",
                 "/pulls",
                 {
-                    "title": f"{task.title} (agent task {task.id})",
+                    "title": title or f"{task.title} (agent task {task.id})",
                     "head": head,
                     "base": self.base_branch,
-                    "body": pull_request_body(task),
+                    "body": body or pull_request_body(task),
                 },
             )
         except OrchestratorError as exc:

@@ -23,6 +23,7 @@ from orchestrator.app.github.projects import (
 )
 from orchestrator.app.github.publisher import PullRequestPublisher
 from orchestrator.app.jira.context import describe_hierarchy
+from orchestrator.app.jira.stories import StoryDelivery, story_branch_name, story_item
 from orchestrator.app.pipeline.project_folder import FolderRule, folder_rule
 from orchestrator.app.pipeline.stage_isolation import StageIsolation
 from orchestrator.app.vcs.git_manager import changed_paths
@@ -98,6 +99,7 @@ class PipelineService:
         board: TaskBoard | None = None,
         code_root: str | None = None,
         tests_root: str | None = None,
+        stories: StoryDelivery | None = None,
     ) -> None:
         self.db = db
         self.code_root = code_root
@@ -108,6 +110,7 @@ class PipelineService:
         self.publisher = publisher
         self.max_fix_attempts = max_fix_attempts
         self.board = board
+        self.stories = stories
 
     def _move_card(self, task: Task, column: str) -> None:
         """Move the task's board card, if a board is configured."""
@@ -146,8 +149,8 @@ class PipelineService:
                 problem = outcome.problem
                 continue
 
-            if outcome.status == TaskStatus.COMPLETED and not self._open_pull_request(
-                task, chain.branches, chain.pushed
+            if outcome.status == TaskStatus.COMPLETED and not self._deliver(
+                task, chain
             ):
                 return self._finish(task, TaskStatus.FAILED)
 
@@ -240,6 +243,19 @@ class PipelineService:
 
         return _Attempt(status=TaskStatus.COMPLETED)
 
+    def _deliver(self, task: Task, chain: _Chain) -> bool:
+        """Hand over approved work: into its Story's branch, else as its own PR.
+
+        A task under a Jira Story gets no pull request of its own; the Story's one
+        pull request opens when all of the Story's tasks are in its branch.
+        """
+        item = story_item(task) if self.stories is not None else None
+
+        if item is not None and self.stories is not None:
+            return self.stories.deliver(task, item)
+
+        return self._open_pull_request(task, chain.branches, chain.pushed)
+
     def _verification_problem(self) -> str:
         """A message listing the failed checks, to give the builder."""
         failures = self.agents.last_failed_checks
@@ -292,7 +308,9 @@ class PipelineService:
         self.db.commit()
         if status == TaskStatus.COMPLETED:
             # Without a pull request there is nothing left to wait for.
-            self._move_card(task, PR_OPEN if task.pull_request_url else DONE)
+            # A Story's task is done once it is in the Story's branch.
+            own_pr = task.pull_request_url and not task.story_branch
+            self._move_card(task, PR_OPEN if own_pr else DONE)
         else:
             self._move_card(task, FAILED)
         logger.info(
@@ -323,7 +341,11 @@ class PipelineService:
             header += f"Where to put files: {rule.describe()}\n\n"
         # A task that waited for others was cut from the merged origin/main, which
         # local main may not have caught up with yet.
-        base = "origin/main" if task.blocked_by else "main"
+        item = story_item(task) if task.blocked_by else None
+        if item is not None:
+            base = story_branch_name(item)
+        else:
+            base = "origin/main" if task.blocked_by else "main"
 
         if role == "builder" and problem:
             return (

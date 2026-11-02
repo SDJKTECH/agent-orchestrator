@@ -21,7 +21,11 @@ from orchestrator.app.core.config import get_settings
 from orchestrator.app.core.logging_config import setup_logging
 from orchestrator.app.dashboard.routes import router as dashboard_router
 from orchestrator.app.db.database import SessionLocal, create_tables, engine
-from orchestrator.app.db.migrations import migrate_task_columns, migrate_usage_columns
+from orchestrator.app.db.migrations import (
+    migrate_jira_item_columns,
+    migrate_task_columns,
+    migrate_usage_columns,
+)
 from orchestrator.app.github.poller import IntakePoller
 from orchestrator.app.github.reporter import make_reporter
 from orchestrator.app.jira.poller import JiraPoller
@@ -38,6 +42,7 @@ async def lifespan(app: FastAPI):
     create_tables()
     migrate_usage_columns(engine)
     migrate_task_columns(engine)
+    migrate_jira_item_columns(engine)
     logger.info("Application startup")
 
     current = get_settings()
