@@ -75,6 +75,15 @@ def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
     return state, False
 
 
+def hud_text(state: GameState, high_score: int = 0) -> str:
+    """Build the one-line HUD string (pure, no rendering)."""
+    return (
+        f"Score: {state.score}   Length: {len(state.snake)}"
+        f"   Level: {level_for_score(state.score)}"
+        f"   Best: {max(high_score, state.score)}"
+    )
+
+
 def _draw_centered(
     screen: pygame.Surface, font: pygame.font.Font, text: str, y: int
 ) -> None:
@@ -117,11 +126,7 @@ def draw(
     for i, cell in enumerate(state.snake):
         pygame.draw.rect(screen, HEAD_COLOR if i == 0 else SNAKE_COLOR, cell_rect(cell))
 
-    hud = (
-        f"Score: {state.score}   Level: {level_for_score(state.score)}"
-        f"   Best: {max(high_score, state.score)}"
-    )
-    screen.blit(font.render(hud, True, TEXT_COLOR), (10, 8))
+    screen.blit(font.render(hud_text(state, high_score), True, TEXT_COLOR), (10, 8))
 
     if countdown is not None:
         big_font = pygame.font.Font(None, 160)
