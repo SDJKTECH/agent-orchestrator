@@ -48,9 +48,9 @@ def key_to_direction(key: int) -> Direction | None:
     return KEY_TO_DIRECTION.get(key)
 
 
-def new_game() -> GameState:
-    """Create a fresh game state."""
-    return GameState(GRID_WIDTH, GRID_HEIGHT)
+def new_game(width: int = GRID_WIDTH, height: int = GRID_HEIGHT) -> GameState:
+    """Create a fresh game state of the given board size."""
+    return GameState(width, height)
 
 
 def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
@@ -62,7 +62,7 @@ def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
     """
     if state.game_over:
         if key == pygame.K_r:
-            return new_game(), False
+            return new_game(state.width, state.height), False
         if key == pygame.K_q:
             return state, True
         return state, False
@@ -137,19 +137,19 @@ def draw(
         _draw_centered(screen, font, "Press R to restart or Q to quit", mid + 30)
 
 
-def run() -> None:
+def run(width: int = GRID_WIDTH, height: int = GRID_HEIGHT) -> None:
     """Open the window and run the game loop until the player quits."""
     pygame.init()
     try:
         screen = pygame.display.set_mode(
-            (GRID_WIDTH * CELL_SIZE, HUD_HEIGHT + GRID_HEIGHT * CELL_SIZE)
+            (width * CELL_SIZE, HUD_HEIGHT + height * CELL_SIZE)
         )
         pygame.display.set_caption("Snake")
         font = pygame.font.Font(None, 28)
         clock = pygame.time.Clock()
         step_event = pygame.USEREVENT + 1
         high_score = load_high_score()
-        state = new_game()
+        state = new_game(width, height)
         level = level_for_score(state.score)
         pygame.time.set_timer(step_event, 1000 // speed_for_level(level))
         start_ticks = pygame.time.get_ticks()
