@@ -1,6 +1,7 @@
 # Mirrors a task's progress on its Jira issue: moves the status, adds comments.
 # Failures are logged and swallowed, so a Jira outage never fails an agent run.
 import logging
+import time
 
 from sqlalchemy.orm import Session
 
@@ -32,6 +33,11 @@ from orchestrator.app.jira.progress import sync_progress
 from orchestrator.app.planning.dependencies import describe_blockers
 
 logger = logging.getLogger(__name__)
+
+# Jira answers 404 for an issue that was deleted and also for one it will not show
+# to a caller whose login failed. An issue reported missing is asked about again
+# after this long, so a fixed login is noticed without a restart.
+MISSING_RETRY_SECONDS = 600
 
 # Jira status to move an issue to for each pipeline column. Jira workflows differ,
 # so JIRA_STATUS_MAP can change these; "-" leaves the issue where it is.
@@ -79,8 +85,8 @@ class JiraTracker:
         self.api = api
         self.status_map = DEFAULT_STATUS_MAP if status_map is None else status_map
         self.pulls = pulls
-        # Issues Jira says do not exist (deleted, or not visible): not asked again.
-        self._gone: set[str] = set()
+        # Issues Jira says do not exist (deleted, or not visible) -> when to retry.
+        self._gone: dict[str, float] = {}
 
     def move(self, task: Task, column: str) -> bool:
         """Show `column` on the task's Jira issue. False when Jira could not be told."""
@@ -187,26 +193,28 @@ class JiraTracker:
     def set_status(self, key: str, target: str) -> bool:
         """Move an issue to the status named `target`. False if Jira cannot be told.
 
-        An issue Jira reports as not found is remembered and left alone from then
-        on, so a deleted Story is not asked about on every poll.
+        An issue Jira reports as not found is left alone for a while, so a deleted
+        Story is not asked about on every poll.
         """
-        if key in self._gone:
+        if self._gone.get(key, 0.0) > time.monotonic():
             return False
 
         try:
             self._transition(key, target)
         except OrchestratorError as exc:
             if "failed with 404" in str(exc):
-                self._gone.add(key)
+                self._gone[key] = time.monotonic() + MISSING_RETRY_SECONDS
                 logger.warning(
-                    "%s no longer exists in Jira (or is not visible); its status "
-                    "will not be updated again until the server restarts.",
+                    "%s was not found in Jira (deleted, or not visible to this "
+                    "login); asking again in %s minutes.",
                     key,
+                    MISSING_RETRY_SECONDS // 60,
                 )
             else:
                 logger.warning("Could not move %s to '%s': %s", key, target, exc)
             return False
 
+        self._gone.pop(key, None)
         return True
 
     def _finish_story(self, item: JiraItem) -> bool:

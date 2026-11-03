@@ -248,7 +248,7 @@ def test_a_story_deleted_in_jira_is_not_asked_about_again(env) -> None:
     # The Story and the Epic were each asked about once, then left alone.
     assert asked == 2
     assert len(transport.calls) == asked
-    assert tracker._gone == {"SG-2", "SG-1"}
+    assert set(tracker._gone) == {"SG-2", "SG-1"}
 
 
 def test_other_jira_errors_are_still_retried(env) -> None:
@@ -263,4 +263,29 @@ def test_other_jira_errors_are_still_retried(env) -> None:
     tracker.sync_merged(session)
 
     assert asked > 0 and len(transport.calls) == 2 * asked
-    assert tracker._gone == set()
+    assert tracker._gone == {}
+
+
+def test_an_issue_reported_missing_is_asked_about_again_later(env, monkeypatch) -> None:
+    from orchestrator.app.jira import tracker as tracker_module
+
+    session, *_ = env
+    first, _ = story_tasks(env, "SG-3", "SG-4")
+    first.status = TaskStatus.RUNNING
+    transport = DeletedInJira()
+    tracker = JiraTracker(JiraApi("https://x.test", "e", "t", transport))
+    now = [1000.0]
+    monkeypatch.setattr(tracker_module.time, "monotonic", lambda: now[0])
+
+    tracker.sync_merged(session)
+    asked = len(transport.calls)
+    now[0] += tracker_module.MISSING_RETRY_SECONDS - 1
+    tracker.sync_merged(session)
+
+    assert len(transport.calls) == asked
+
+    # A login that was broken and is now fixed gets noticed without a restart.
+    now[0] += 2
+    tracker.sync_merged(session)
+
+    assert len(transport.calls) == 2 * asked
