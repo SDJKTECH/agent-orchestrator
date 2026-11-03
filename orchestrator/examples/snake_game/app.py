@@ -57,13 +57,13 @@ def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
     """Apply a key press to the game.
 
     Returns ``(state, quit_requested)``. While the game is over, R returns a
-    new game state and Q requests quitting; otherwise direction keys call
-    ``change_direction``.
+    new game state and Q or Esc requests quitting; while playing, Esc is
+    ignored and direction keys call ``change_direction``.
     """
     if state.game_over:
         if key == pygame.K_r:
             return new_game(), False
-        if key == pygame.K_q:
+        if key in (pygame.K_q, pygame.K_ESCAPE):
             return state, True
         return state, False
     if key == pygame.K_p:
