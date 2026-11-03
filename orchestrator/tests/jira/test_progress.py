@@ -289,3 +289,69 @@ def test_an_issue_reported_missing_is_asked_about_again_later(env, monkeypatch) 
     tracker.sync_merged(session)
 
     assert len(transport.calls) == 2 * asked
+
+
+def run_with_jira_status(session, actual, setter=None):
+    setter = setter or StatusSetter()
+    moves = sync_progress(
+        session,
+        RecordingJira(unfinished=[]),
+        DEFAULT_STATUS_MAP,
+        setter,
+        lambda key: actual,
+    )
+    return moves, setter
+
+
+def test_an_issue_already_done_in_jira_is_never_moved_back(env) -> None:
+    session, *_ = env
+    first, _ = story_tasks(env, "SG-3", "SG-4")
+    first.status = TaskStatus.RUNNING
+
+    moves, setter = run_with_jira_status(session, "Done")
+
+    assert moves == [] and setter.calls == []
+    # What Jira really says is remembered, so it is not asked again.
+    assert items(session)["SG-2"].jira_status == "Done"
+
+
+def test_an_issue_further_along_than_the_target_is_left_alone(env) -> None:
+    session, *_ = env
+    (task,) = story_tasks(env, "SG-3")
+    task.status = TaskStatus.RUNNING
+
+    moves, setter = run_with_jira_status(session, "In Review")
+
+    assert setter.calls == []
+
+
+def test_an_issue_behind_its_target_is_still_moved_forward(env) -> None:
+    session, *_ = env
+    first, _ = story_tasks(env, "SG-3", "SG-4")
+    first.status = TaskStatus.RUNNING
+
+    moves, _ = run_with_jira_status(session, "To Do")
+
+    assert Move("SG-2", "In Progress") in moves
+
+
+def test_an_unreadable_status_does_not_stop_the_move(env) -> None:
+    session, *_ = env
+    first, _ = story_tasks(env, "SG-3", "SG-4")
+    first.status = TaskStatus.RUNNING
+
+    moves, _ = run_with_jira_status(session, None)
+
+    assert Move("SG-2", "In Progress") in moves
+
+
+def test_the_tracker_does_not_reopen_a_story_that_is_done_in_jira(env) -> None:
+    session, *_ = env
+    first, _ = story_tasks(env, "SG-3", "SG-4")
+    first.status = TaskStatus.RUNNING
+    transport = FakeJira(status="Done")
+    tracker = JiraTracker(JiraApi("https://x.test", "e", "t", transport))
+
+    tracker.sync_merged(session)
+
+    assert [p for m, p, _ in transport.calls if m == "POST"] == []

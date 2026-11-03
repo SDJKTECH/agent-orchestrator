@@ -33,6 +33,8 @@ _STARTED = (
 
 # Moves an issue to a Jira status by name; False if Jira could not be told.
 SetStatus = Callable[[str, str], bool]
+# The issue's status in Jira right now, or None if it cannot be read.
+CurrentStatus = Callable[[str], str | None]
 
 
 @dataclass(frozen=True)
@@ -89,24 +91,51 @@ def _unfinished_in_jira(api: JiraApi, epic: JiraItem) -> bool | None:
     return bool(found)
 
 
+def _ranks(status_map: dict[str, str]) -> dict[str, int]:
+    """How far along each status is, so an issue is only ever moved forward."""
+    ranks: dict[str, int] = {}
+
+    for rank, column in enumerate((BUILDING, PR_OPEN, DONE), start=1):
+        name = status_map.get(column)
+
+        if name:
+            ranks.setdefault(name.casefold(), rank)
+
+    return ranks
+
+
 def sync_progress(
     session: Session,
     api: JiraApi | None,
     status_map: dict[str, str],
     set_status: SetStatus,
+    current_status: CurrentStatus | None = None,
 ) -> list[Move]:
     """Move Stories and Epics to the Jira status their work has reached.
 
     `status_map` is the board-column to Jira-status map. A column the map leaves
-    out (set to "-") is not moved to. Returns what was moved.
+    out (set to "-") is not moved to. With `current_status`, Jira is asked for the
+    real status first, and an issue that is already as far along or further (for
+    example finished by hand) is left alone. Returns what was moved.
     """
     moves: list[Move] = []
+    ranks = _ranks(status_map)
 
     def move(item: JiraItem, column: str | None) -> None:
         target = status_map.get(column or "")
 
         if not target or (item.jira_status or "").casefold() == target.casefold():
             return
+
+        if current_status is not None:
+            actual = current_status(item.key)
+
+            if actual and ranks.get(actual.casefold(), 0) >= ranks.get(
+                target.casefold(), 0
+            ):
+                item.jira_status = actual
+                session.commit()
+                return
 
         if set_status(item.key, target):
             item.jira_status = target

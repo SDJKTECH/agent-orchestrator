@@ -187,8 +187,21 @@ class JiraTracker:
     def sync_merged(self, session: Session) -> list[int]:
         """Mark tasks whose pull request has merged as Done in Jira."""
         sync_merged_stories(session, self.pulls, self._finish_story)
-        sync_progress(session, self.api, self.status_map, self.set_status)
+        sync_progress(
+            session, self.api, self.status_map, self.set_status, self.current_status
+        )
         return sync_merged_tasks(session, self.pulls, self.move)
+
+    def current_status(self, key: str) -> str | None:
+        """The issue's status in Jira now; None if it cannot be read."""
+        if self._is_missing(key):
+            return None
+
+        try:
+            return self.api.status_name(key)
+        except OrchestratorError as exc:
+            self._note_missing(key, exc)
+            return None
 
     def set_status(self, key: str, target: str) -> bool:
         """Move an issue to the status named `target`. False if Jira cannot be told.
@@ -196,25 +209,35 @@ class JiraTracker:
         An issue Jira reports as not found is left alone for a while, so a deleted
         Story is not asked about on every poll.
         """
-        if self._gone.get(key, 0.0) > time.monotonic():
+        if self._is_missing(key):
             return False
 
         try:
             self._transition(key, target)
         except OrchestratorError as exc:
-            if "failed with 404" in str(exc):
-                self._gone[key] = time.monotonic() + MISSING_RETRY_SECONDS
-                logger.warning(
-                    "%s was not found in Jira (deleted, or not visible to this "
-                    "login); asking again in %s minutes.",
-                    key,
-                    MISSING_RETRY_SECONDS // 60,
-                )
-            else:
+            if not self._note_missing(key, exc):
                 logger.warning("Could not move %s to '%s': %s", key, target, exc)
             return False
 
         self._gone.pop(key, None)
+        return True
+
+    def _is_missing(self, key: str) -> bool:
+        """True while an issue Jira reported as not found is being left alone."""
+        return self._gone.get(key, 0.0) > time.monotonic()
+
+    def _note_missing(self, key: str, exc: OrchestratorError) -> bool:
+        """Remember a 'not found' answer; False if the error was something else."""
+        if "failed with 404" not in str(exc):
+            return False
+
+        self._gone[key] = time.monotonic() + MISSING_RETRY_SECONDS
+        logger.warning(
+            "%s was not found in Jira (deleted, or not visible to this login); "
+            "asking again in %s minutes.",
+            key,
+            MISSING_RETRY_SECONDS // 60,
+        )
         return True
 
     def _finish_story(self, item: JiraItem) -> bool:
