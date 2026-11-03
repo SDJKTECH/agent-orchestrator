@@ -1,8 +1,8 @@
 # AI Coding Agent Orchestrator
 
-A platform for coordinating AI coding agents using Claude Code, Git branches, Git worktrees, and GitHub milestones.
+A platform for coordinating AI coding agents using Claude Code, Git branches, Git worktrees, and GitHub or Jira as the source of tasks.
 
-## Planned capabilities
+## Capabilities
 
 - Task and milestone management
 - Independent agent execution in Git worktrees
@@ -19,7 +19,7 @@ A platform for coordinating AI coding agents using Claude Code, Git branches, Gi
 - Git and GitHub
 - SQLite
 - FastAPI
-- Streamlit (planned)
+- Jira Cloud (optional task source)
 ## Project structure
 
 ```
@@ -33,7 +33,11 @@ orchestrator/app/
                    process control (pause/resume/cancel), job scheduling, usage parsing
   pipeline/        builder -> tester -> reviewer pipeline, one branch per task
   verification/    pytest/ruff quality gate and result storage
-  github/          REST client, issue intake, polling, comments, pull requests
+  github/          REST client, issue intake, polling, comments, pull requests,
+                   Projects board
+  jira/            Jira client, intake, status tracking, Epic/Story creation
+  planning/        requirement planning (Epic, Stories, Subtasks) and task dependencies
+  boards.py        picks the Jira tracker or GitHub board for ISSUE_SOURCE
   api/             HTTP routes and request/response schemas
   dashboard/       monitoring dashboard (page, overview endpoint, stage logic)
 orchestrator/tests/   mirrors the layout above; shared helpers in helpers.py
