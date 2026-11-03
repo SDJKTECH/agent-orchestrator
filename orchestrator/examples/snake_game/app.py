@@ -30,6 +30,7 @@ FOOD_COLOR = (230, 70, 70)
 BONUS_FOOD_COLOR = (255, 210, 50)
 OBSTACLE_COLOR = (130, 130, 150)
 TEXT_COLOR = (240, 240, 240)
+GAME_OVER_LINE_SPACING = 32
 
 KEY_TO_DIRECTION: dict[int, Direction] = {
     pygame.K_UP: Direction.UP,
@@ -73,9 +74,6 @@ def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
     if direction is not None:
         state.change_direction(direction)
     return state, False
-
-
-GAME_OVER_LINE_SPACING = 32
 
 
 def game_over_lines(score: int, high_score: int) -> list[str]:

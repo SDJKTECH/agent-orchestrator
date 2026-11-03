@@ -118,3 +118,38 @@ def test_draw_headless_does_not_raise_for_playing_and_game_over():
         app.draw(screen, font, state)
     finally:
         pygame.quit()
+
+
+def test_game_over_lines_show_scores_and_prompt():
+    assert app.game_over_lines(5, 12) == [
+        "Game Over",
+        "Final score: 5",
+        "High score: 12",
+        "Press R to play again or Esc to quit",
+    ]
+
+
+def test_game_over_lines_high_score_uses_final_score_when_higher():
+    assert app.game_over_lines(20, 12)[2] == "High score: 20"
+    assert app.game_over_lines(7, 0)[2] == "High score: 7"
+
+
+@pytest.mark.parametrize("high_score", [None, 0, 3, 50])
+def test_draw_headless_game_over_with_and_without_high_score(high_score):
+    pygame.init()
+    try:
+        screen = pygame.Surface(
+            (
+                app.GRID_WIDTH * app.CELL_SIZE,
+                app.HUD_HEIGHT + app.GRID_HEIGHT * app.CELL_SIZE,
+            )
+        )
+        font = pygame.font.Font(None, 28)
+        state = app.new_game()
+        state.game_over = True
+        if high_score is None:
+            app.draw(screen, font, state)
+        else:
+            app.draw(screen, font, state, high_score=high_score)
+    finally:
+        pygame.quit()
