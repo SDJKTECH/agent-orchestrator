@@ -50,6 +50,7 @@ class GameState:
         seed: int | None = None,
         wrap: bool = False,
         obstacle_count: int = 0,
+        longest_streak: int = 0,
     ) -> None:
         if width < 3 or height < 1:
             raise ValueError("grid is too small")
@@ -71,6 +72,8 @@ class GameState:
         self.bonus_food: Cell | None = None
         self.bonus_steps_left = 0
         self.foods_eaten = 0
+        self.current_streak = 0
+        self.longest_streak = longest_streak
         self.food: Cell | None = self._place_food()
 
     def _place_obstacles(self, count: int) -> set[Cell]:
@@ -182,6 +185,7 @@ class GameState:
         if self.wrap:
             new_head = (new_head[0] % self.width, new_head[1] % self.height)
         elif not (0 <= new_head[0] < self.width and 0 <= new_head[1] < self.height):
+            self.current_streak = 0
             self.game_over = True
             return
 
@@ -201,6 +205,9 @@ class GameState:
         self.snake.insert(0, new_head)
         if not eating:
             self.snake.pop()
+        if eating:
+            self.current_streak += 1
+            self.longest_streak = max(self.longest_streak, self.current_streak)
         if eating_bonus:
             self.score += BONUS_POINTS
             self.bonus_food = None

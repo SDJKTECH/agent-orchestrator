@@ -48,9 +48,9 @@ def key_to_direction(key: int) -> Direction | None:
     return KEY_TO_DIRECTION.get(key)
 
 
-def new_game() -> GameState:
-    """Create a fresh game state."""
-    return GameState(GRID_WIDTH, GRID_HEIGHT)
+def new_game(longest_streak: int = 0) -> GameState:
+    """Create a fresh game state, optionally carrying over the longest streak."""
+    return GameState(GRID_WIDTH, GRID_HEIGHT, longest_streak=longest_streak)
 
 
 def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
@@ -62,7 +62,7 @@ def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
     """
     if state.game_over:
         if key == pygame.K_r:
-            return new_game(), False
+            return new_game(state.longest_streak), False
         if key == pygame.K_q:
             return state, True
         return state, False
@@ -73,6 +73,16 @@ def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
     if direction is not None:
         state.change_direction(direction)
     return state, False
+
+
+def hud_text(state: GameState, high_score: int = 0) -> str:
+    """Build the one-line HUD string (pure, no rendering)."""
+    return (
+        f"Score: {state.score}   Length: {len(state.snake)}"
+        f"   Streak: {state.longest_streak}"
+        f"   Level: {level_for_score(state.score)}"
+        f"   Best: {max(high_score, state.score)}"
+    )
 
 
 def _draw_centered(
@@ -117,11 +127,7 @@ def draw(
     for i, cell in enumerate(state.snake):
         pygame.draw.rect(screen, HEAD_COLOR if i == 0 else SNAKE_COLOR, cell_rect(cell))
 
-    hud = (
-        f"Score: {state.score}   Level: {level_for_score(state.score)}"
-        f"   Best: {max(high_score, state.score)}"
-    )
-    screen.blit(font.render(hud, True, TEXT_COLOR), (10, 8))
+    screen.blit(font.render(hud_text(state, high_score), True, TEXT_COLOR), (10, 8))
 
     if countdown is not None:
         big_font = pygame.font.Font(None, 160)
