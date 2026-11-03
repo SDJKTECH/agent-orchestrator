@@ -221,3 +221,46 @@ def test_the_tracker_moves_the_story_in_jira_on_each_poll(env) -> None:
     posted = [p for m, p, _ in transport.calls if m == "POST"]
     assert "/issue/SG-2/transitions" in posted
     assert "/issue/SG-1/transitions" in posted
+
+
+class DeletedInJira(FakeJira):
+    """A Jira where the issues were deleted: reading one answers 404."""
+
+    def __call__(self, method, path, body):
+        self.calls.append((method, path, body))
+        if "/issue/" in path and method != "POST":
+            raise IssueSourceError(f"Jira API {method} {path} failed with 404: gone")
+        return None
+
+
+def test_a_story_deleted_in_jira_is_not_asked_about_again(env) -> None:
+    session, *_ = env
+    first, _ = story_tasks(env, "SG-3", "SG-4")
+    first.status = TaskStatus.RUNNING
+    transport = DeletedInJira()
+    tracker = JiraTracker(JiraApi("https://x.test", "e", "t", transport))
+
+    tracker.sync_merged(session)
+    asked = len(transport.calls)
+    tracker.sync_merged(session)
+    tracker.sync_merged(session)
+
+    # The Story and the Epic were each asked about once, then left alone.
+    assert asked == 2
+    assert len(transport.calls) == asked
+    assert tracker._gone == {"SG-2", "SG-1"}
+
+
+def test_other_jira_errors_are_still_retried(env) -> None:
+    session, *_ = env
+    first, _ = story_tasks(env, "SG-3", "SG-4")
+    first.status = TaskStatus.RUNNING
+    transport = FakeJira(fail=True)
+    tracker = JiraTracker(JiraApi("https://x.test", "e", "t", transport))
+
+    tracker.sync_merged(session)
+    asked = len(transport.calls)
+    tracker.sync_merged(session)
+
+    assert asked > 0 and len(transport.calls) == 2 * asked
+    assert tracker._gone == set()

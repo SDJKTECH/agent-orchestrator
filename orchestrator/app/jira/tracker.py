@@ -79,6 +79,8 @@ class JiraTracker:
         self.api = api
         self.status_map = DEFAULT_STATUS_MAP if status_map is None else status_map
         self.pulls = pulls
+        # Issues Jira says do not exist (deleted, or not visible): not asked again.
+        self._gone: set[str] = set()
 
     def move(self, task: Task, column: str) -> bool:
         """Show `column` on the task's Jira issue. False when Jira could not be told."""
@@ -183,11 +185,26 @@ class JiraTracker:
         return sync_merged_tasks(session, self.pulls, self.move)
 
     def set_status(self, key: str, target: str) -> bool:
-        """Move an issue to the status named `target`. False if Jira cannot be told."""
+        """Move an issue to the status named `target`. False if Jira cannot be told.
+
+        An issue Jira reports as not found is remembered and left alone from then
+        on, so a deleted Story is not asked about on every poll.
+        """
+        if key in self._gone:
+            return False
+
         try:
             self._transition(key, target)
         except OrchestratorError as exc:
-            logger.warning("Could not move %s to '%s': %s", key, target, exc)
+            if "failed with 404" in str(exc):
+                self._gone.add(key)
+                logger.warning(
+                    "%s no longer exists in Jira (or is not visible); its status "
+                    "will not be updated again until the server restarts.",
+                    key,
+                )
+            else:
+                logger.warning("Could not move %s to '%s': %s", key, target, exc)
             return False
 
         return True
