@@ -75,7 +75,7 @@ def test_restart_with_r_returns_fresh_game():
     assert new is not old
     assert new.game_over is False
     assert new.score == 0
-    assert (new.width, new.height) == (app.GRID_WIDTH, app.GRID_HEIGHT)
+    assert (new.width, new.height) == (old.width, old.height)
     assert len(new.snake) == 3
 
 
@@ -100,6 +100,64 @@ def test_new_game_uses_configured_grid():
     state = app.new_game()
     assert (state.width, state.height) == (app.GRID_WIDTH, app.GRID_HEIGHT)
     assert state.game_over is False
+
+
+def test_new_game_accepts_custom_size():
+    state = app.new_game(30, 15)
+    assert (state.width, state.height) == (30, 15)
+    assert state.game_over is False
+
+
+def test_restart_keeps_non_square_board_size():
+    old = GameState(30, 15, seed=1)
+    old.game_over = True
+    new, quit_requested = app.handle_key(old, pygame.K_r)
+    assert quit_requested is False
+    assert new is not old
+    assert (new.width, new.height) == (30, 15)
+    assert new.game_over is False
+
+
+def test_draw_headless_non_square_board():
+    pygame.init()
+    try:
+        screen = pygame.Surface(
+            (30 * app.CELL_SIZE, app.HUD_HEIGHT + 15 * app.CELL_SIZE)
+        )
+        font = pygame.font.Font(None, 28)
+        state = app.new_game(30, 15)
+        app.draw(screen, font, state)
+        state.game_over = True
+        app.draw(screen, font, state)
+    finally:
+        pygame.quit()
+
+
+@pytest.mark.parametrize(("args", "size"), [((30, 15), (30, 15)), ((), (20, 20))])
+def test_run_sizes_window_and_game(monkeypatch, args, size):
+    width, height = size
+    captured = {}
+    real_set_mode = pygame.display.set_mode
+
+    def fake_set_mode(dims, *a, **kw):
+        captured["dims"] = dims
+        return real_set_mode(dims, *a, **kw)
+
+    def fake_new_game(w, h):
+        captured["game"] = (w, h)
+        return GameState(w, h, seed=1)
+
+    monkeypatch.setattr(pygame.display, "set_mode", fake_set_mode)
+    monkeypatch.setattr(app, "new_game", fake_new_game)
+    monkeypatch.setattr(app, "load_high_score", lambda: 0)
+    monkeypatch.setattr(app, "save_high_score", lambda score: None)
+    monkeypatch.setattr(pygame.event, "get", lambda: [pygame.event.Event(pygame.QUIT)])
+    app.run(*args)
+    assert captured["dims"] == (
+        width * app.CELL_SIZE,
+        app.HUD_HEIGHT + height * app.CELL_SIZE,
+    )
+    assert captured["game"] == (width, height)
 
 
 def test_draw_headless_does_not_raise_for_playing_and_game_over():
