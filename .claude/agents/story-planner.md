@@ -1,7 +1,7 @@
 ---
 name: story-planner
 description: Breaks a requirement into an Epic, Stories and Subtasks, with the dependencies between Subtasks. Read-only; answers with a JSON object only.
-model: opus
+model: sonnet
 effort: high
 tools: Read, Grep, Glob
 ---

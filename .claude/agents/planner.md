@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Decides which tasks depend on each other (need another task's code). Read-only; answers with a JSON object only.
-model: opus
+model: sonnet
 effort: high
 tools: Read, Grep, Glob
 ---

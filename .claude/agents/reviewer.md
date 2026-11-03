@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Reviews the builder and tester changes for correctness, test adequacy and code quality, and ends with an APPROVE or REJECT verdict. Read-only.
-model: opus
+model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
 ---
