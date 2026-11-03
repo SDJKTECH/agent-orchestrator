@@ -75,6 +75,19 @@ def handle_key(state: GameState, key: int) -> tuple[GameState, bool]:
     return state, False
 
 
+GAME_OVER_LINE_SPACING = 32
+
+
+def game_over_lines(score: int, high_score: int) -> list[str]:
+    """Return the text lines of the game-over overlay, top to bottom."""
+    return [
+        "Game Over",
+        f"Final score: {score}",
+        f"High score: {max(high_score, score)}",
+        "Press R to play again or Esc to quit",
+    ]
+
+
 def _draw_centered(
     screen: pygame.Surface, font: pygame.font.Font, text: str, y: int
 ) -> None:
@@ -131,10 +144,18 @@ def draw(
         _draw_centered(screen, font, "Paused", screen.get_height() // 2)
 
     if state.game_over:
+        lines = game_over_lines(state.score, high_score)
         mid = screen.get_height() // 2
-        _draw_centered(screen, font, "Game Over", mid - 30)
-        _draw_centered(screen, font, f"Final score: {state.score}", mid)
-        _draw_centered(screen, font, "Press R to restart or Q to quit", mid + 30)
+        top = mid - GAME_OVER_LINE_SPACING * len(lines) // 2
+        panel = pygame.Surface(
+            (screen.get_width(), GAME_OVER_LINE_SPACING * len(lines) + 20),
+            pygame.SRCALPHA,
+        )
+        panel.fill((0, 0, 0, 170))
+        screen.blit(panel, (0, top - 10))
+        for i, line in enumerate(lines):
+            y = top + GAME_OVER_LINE_SPACING // 2 + i * GAME_OVER_LINE_SPACING
+            _draw_centered(screen, font, line, y)
 
 
 def run() -> None:
